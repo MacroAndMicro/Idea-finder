@@ -13,7 +13,10 @@ scrapers/
   store.py           SupabaseStore: idempotent insert into raw_signals (+ ingestion_runs if present)
   cluster.py         pure clustering of pain-point signals + 1–100 confidence score
   ingest.py          CLI: python -m scrapers.ingest --source {hackernews,github,stackexchange}
+  extract.py         CLI: python -m scrapers.extract — per-signal LLM extraction → signal_extractions
   llm/               provider-agnostic LLMClient / EmbeddingClient: base, factory, fake, gemini
+  llm/prompts/       versioned prompts (extract_signal_v1); never edited after shipping
+  llm/extraction_schema.py  strict JSON validation of extraction output
   tests/             pytest suite (test_*.py, conftest.py, helpers.py)
   tests/fixtures/    recorded API responses (github, hackernews, stackexchange) — tests never touch the network
 ```
@@ -33,6 +36,23 @@ python -m scrapers.ingest --source hackernews [--limit 50] [--query Q ...] [--si
 
 Needs `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (not for `--dry-run`). Re-runs are safe:
 rows already present for `(source_platform, external_id)` are skipped, never overwritten.
+
+## Extract (per-signal LLM)
+
+```
+python -m scrapers.extract [--limit 25] [--dry-run]
+```
+
+Takes `raw_signals` with `processed_at` null (oldest first), runs prompt
+`extract_signal_v1` through the `LLM_*`-selected client, validates the JSON
+(`llm/extraction_schema.py`) and upserts `signal_extractions` with `llm_provider`,
+`llm_model`, `prompt_version`, then sets `processed_at`.
+- Invalid output is retried once; still invalid → stored as a failed row
+  (`is_pain_point`/`is_b2b` null, never clustered) and marked processed.
+- Provider/network errors leave the signal unprocessed; 3 in a row stop the run.
+- Post text is untrusted: fenced in `<signal>` tags, delimiter look-alikes neutralised,
+  title/body truncated (300/6000 chars); the system prompt forbids following it and
+  forbids inventing facts (null / `Unspecified` when absent).
 
 ## Clustering & confidence (`cluster.py`)
 
