@@ -12,6 +12,9 @@ public final class TestDb {
 
 	public static final String DATA = "/db/opportunity_cards_test_data.sql";
 
+	/** IF-24 fixture vectors for cards 1-5; requires pgvector (available in CI). */
+	public static final String EMBEDDINGS = "/db/opportunity_cards_test_embeddings.sql";
+
 	/** Run each script as a single statement (the schema script contains a DO $$ block). */
 	public static final String WHOLE_FILE = ScriptUtils.EOF_STATEMENT_SEPARATOR;
 

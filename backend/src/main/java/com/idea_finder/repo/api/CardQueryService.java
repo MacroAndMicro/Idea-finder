@@ -1,7 +1,11 @@
 package com.idea_finder.repo.api;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 import java.util.Locale;
 import java.util.stream.Collectors;
 
@@ -11,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.idea_finder.repo.domain.EconomicIntent;
+import com.idea_finder.repo.domain.OpportunityCard;
 import com.idea_finder.repo.domain.OpportunityCardRepository;
 import com.idea_finder.repo.domain.RawSignalRepository;
 import com.idea_finder.repo.domain.SourcePlatform;
@@ -26,6 +31,8 @@ public class CardQueryService {
 	public static final int MAX_PAGE = 10_000;
 	public static final int MIN_Q = 2;
 	public static final int MAX_Q = 100;
+	public static final int DEFAULT_SIMILAR = 5;
+	public static final int MAX_SIMILAR = 20;
 
 	private final OpportunityCardRepository repository;
 	private final RawSignalRepository signals;
@@ -65,6 +72,36 @@ public class CardQueryService {
 			throw new CardNotFoundException(cardId);
 		}
 		return PageResponse.of(signals.findByCardId(cardId, pageable), SignalResponse::from);
+	}
+
+	/**
+	 * IF-24: cards nearest to {@code id} by embedding (cosine), most similar first. 404 for an
+	 * unknown card; empty when the card has no embedding.
+	 */
+	public List<SimilarCardResponse> similar(long id, Integer limit) {
+		int n = limit == null ? DEFAULT_SIMILAR : limit;
+		if (n < 1 || n > MAX_SIMILAR) {
+			throw new InvalidParameterException("limit", "limit must be between 1 and " + MAX_SIMILAR);
+		}
+		if (!repository.existsById(id)) {
+			throw new CardNotFoundException(id);
+		}
+		List<Object[]> nearest = repository.findNearest(id, n);
+		if (nearest.isEmpty()) {
+			return List.of();
+		}
+		Map<Long, OpportunityCard> byId = repository
+			.findByIdIn(nearest.stream().map(row -> ((Number) row[0]).longValue()).toList())
+			.stream()
+			.collect(Collectors.toMap(OpportunityCard::getId, Function.identity()));
+		List<SimilarCardResponse> result = new ArrayList<>(nearest.size());
+		for (Object[] row : nearest) {
+			OpportunityCard card = byId.get(((Number) row[0]).longValue());
+			if (card != null) { // deleted between the two queries
+				result.add(SimilarCardResponse.of(CardResponse.from(card), ((Number) row[1]).doubleValue()));
+			}
+		}
+		return result;
 	}
 
 	/** Shared paging limits for every list endpoint. */

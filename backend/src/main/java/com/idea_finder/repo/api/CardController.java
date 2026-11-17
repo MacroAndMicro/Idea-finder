@@ -1,6 +1,7 @@
 package com.idea_finder.repo.api;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,6 +35,14 @@ public class CardController {
 	@GetMapping("/{id}")
 	public CardResponse get(@PathVariable long id) {
 		return cards.get(id);
+	}
+
+	/** IF-24: related cards (nearest by embedding), most similar first. */
+	@GetMapping("/{id}/similar")
+	public List<SimilarCardResponse> similar(
+			@PathVariable long id,
+			@RequestParam(required = false) Integer limit) {
+		return cards.similar(id, limit);
 	}
 
 	/** The raw signals (evidence) a card is anchored in. */
