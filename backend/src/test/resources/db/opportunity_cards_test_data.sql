@@ -10,6 +10,18 @@ values
   (5, 'Unscored card',         'reddit', 'https://reddit.com/r/x/5', 'snippet 5', 'P5', 'T5', null, null, null,  null, null, null, '2026-11-14T00:00:00Z', '2026-11-14T00:00:00Z'),
   (6, 'Other unspecified',     'other', null, null, 'P6', 'T6', 'M6', 'D6', 'Unspecified', 'W6', 70, 'm', '2026-11-09T00:00:00Z', '2026-11-09T00:00:00Z');
 
+-- IF-35 provenance: card 1 spans 2 signals on 2 platforms; cards 2 and 4 have a last_seen_at
+-- (4 newer than 1, 1 newer than 2); the rest stay null. llm_model/prompt_version must never be exposed.
+update if_test.opportunity_cards set signal_count = 2, platform_count = 2,
+  first_seen_at = '2026-11-01T00:00:00Z', last_seen_at = '2026-11-05T00:00:00Z',
+  llm_model = 'internal-llm-model', prompt_version = 'internal-prompt-v1' where id = 1;
+update if_test.opportunity_cards set signal_count = 1, platform_count = 1,
+  first_seen_at = '2026-11-02T00:00:00Z', last_seen_at = '2026-11-02T00:00:00Z' where id = 2;
+update if_test.opportunity_cards set last_seen_at = '2026-11-07T00:00:00Z' where id = 4;
+-- IF-37: cards 3 and 6 did not pass the B2B filter, card 5 is unknown (null); the rest are B2B.
+update if_test.opportunity_cards set is_b2b_filtered = false where id in (3, 6);
+update if_test.opportunity_cards set is_b2b_filtered = null where id = 5;
+
 -- 4 raw signals. Card 1 has two (signal 2 is newer by source_created_at), card 2 has one,
 -- card 3 has none, signal 4 is not linked to any card. Hashes are set so tests can prove
 -- they are never exposed.

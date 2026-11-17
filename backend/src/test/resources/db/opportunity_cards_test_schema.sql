@@ -28,6 +28,15 @@ create table if_test.opportunity_cards (
   updated_at          timestamptz not null default timezone('utc', now()),
   title               text,
   embedding_model     text,
+  -- Mirror of supabase/migrations/20261117160000_card_provenance.sql (IF-35).
+  signal_count        integer,
+  platform_count      integer,
+  first_seen_at       timestamptz,
+  last_seen_at        timestamptz,
+  llm_model           text,
+  prompt_version      text,
+  constraint opportunity_cards_spread_counts_chk check ((signal_count is null or signal_count >= 0)
+    and (platform_count is null or platform_count >= 0)),
   constraint opportunity_cards_source_chk check (source_platform in
     ('reddit','github','hackernews','stackexchange','g2','capterra','other')),
   constraint opportunity_cards_intent_chk check (economic_intent is null or economic_intent in

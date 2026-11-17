@@ -69,7 +69,16 @@ public interface OpportunityCardRepository
 	 */
 	default Page<OpportunityCard> search(String q, SourcePlatform source, BigDecimal minConfidence,
 			EconomicIntent intent, Pageable pageable) {
-		return findAll(filters(q, source, minConfidence, intent), pageable);
+		return search(q, source, minConfidence, intent, null, pageable);
+	}
+
+	/**
+	 * As above, plus IF-37's optional {@code b2b} filter on is_b2b_filtered: true/false match that
+	 * exact value (cards with an unknown/null flag match neither); null = not filtered.
+	 */
+	default Page<OpportunityCard> search(String q, SourcePlatform source, BigDecimal minConfidence,
+			EconomicIntent intent, Boolean b2b, Pageable pageable) {
+		return findAll(filters(q, source, minConfidence, intent, b2b), pageable);
 	}
 
 	char LIKE_ESCAPE = '\\';
@@ -84,7 +93,7 @@ public interface OpportunityCardRepository
 	}
 
 	static Specification<OpportunityCard> filters(String q, SourcePlatform source, BigDecimal minConfidence,
-			EconomicIntent intent) {
+			EconomicIntent intent, Boolean b2b) {
 		return (root, query, cb) -> {
 			List<Predicate> predicates = new ArrayList<>();
 			if (q != null) {
@@ -102,6 +111,9 @@ public interface OpportunityCardRepository
 			}
 			if (intent != null) {
 				predicates.add(cb.equal(root.get("economicIntent"), intent));
+			}
+			if (b2b != null) {
+				predicates.add(cb.equal(root.get("b2bFiltered"), b2b));
 			}
 			return cb.and(predicates.toArray(Predicate[]::new));
 		};
