@@ -15,3 +15,9 @@ spring:
   jpa:
     hibernate:
       ddl-auto: none
+    open-in-view: false
+
+app:
+  cors:
+    # Comma-separated list of origins allowed to call the API (the Next.js frontend).
+    allowed-origins: ${FRONTEND_ORIGIN:http://localhost:3000}
