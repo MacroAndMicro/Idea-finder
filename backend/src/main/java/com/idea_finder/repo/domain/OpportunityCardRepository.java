@@ -18,6 +18,8 @@ public interface OpportunityCardRepository
 
 	java.util.Optional<OpportunityCard> findById(Long id);
 
+	boolean existsById(Long id);
+
 	/**
 	 * Pageable search. Every filter is optional (null = not filtered).
 	 *

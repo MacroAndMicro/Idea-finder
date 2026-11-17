@@ -34,4 +34,13 @@ public class CardController {
 	public CardResponse get(@PathVariable long id) {
 		return cards.get(id);
 	}
+
+	/** The raw signals (evidence) a card is anchored in. */
+	@GetMapping("/{id}/signals")
+	public PageResponse<SignalResponse> signals(
+			@PathVariable long id,
+			@RequestParam(required = false) Integer page,
+			@RequestParam(required = false) Integer size) {
+		return cards.signals(id, page, size);
+	}
 }
