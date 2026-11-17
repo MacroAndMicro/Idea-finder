@@ -28,8 +28,9 @@ public class CardController {
 			@RequestParam(required = false) String source,
 			@RequestParam(required = false) BigDecimal minConfidence,
 			@RequestParam(required = false) String intent,
-			@RequestParam(required = false) String sort) {
-		return cards.list(page, size, q, source, minConfidence, intent, sort);
+			@RequestParam(required = false) String sort,
+			@RequestParam(required = false) String b2b) {
+		return cards.list(page, size, q, source, minConfidence, intent, sort, b2b);
 	}
 
 	@GetMapping("/{id}")

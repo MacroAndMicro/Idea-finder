@@ -49,6 +49,11 @@ public class CardQueryService {
 
 	public PageResponse<CardResponse> list(Integer page, Integer size, String q, String source,
 			BigDecimal minConfidence, String intent, String sort) {
+		return list(page, size, q, source, minConfidence, intent, sort, null);
+	}
+
+	public PageResponse<CardResponse> list(Integer page, Integer size, String q, String source,
+			BigDecimal minConfidence, String intent, String sort, String b2b) {
 		String keyword = parseQuery(q);
 		if (minConfidence != null
 				&& (minConfidence.compareTo(BigDecimal.ZERO) < 0 || minConfidence.compareTo(BigDecimal.valueOf(100)) > 0)) {
@@ -56,7 +61,8 @@ public class CardQueryService {
 		}
 		PageRequest pageable = pageRequest(page, size, parseSort(sort));
 		return PageResponse.of(
-			repository.search(keyword, parseSource(source), minConfidence, parseIntent(intent), pageable),
+			repository.search(keyword, parseSource(source), minConfidence, parseIntent(intent), parseB2b(b2b),
+				pageable),
 			CardResponse::from);
 	}
 
@@ -139,6 +145,18 @@ public class CardQueryService {
 			// IF-35: most recently seen in the sources first; cards without signal dates last.
 			case "recent" -> Sort.by(Sort.Order.desc("lastSeenAt").nullsLast(), Sort.Order.desc("id"));
 			default -> throw new InvalidParameterException("sort", "sort must be one of: confidence, newest, recent");
+		};
+	}
+
+	/** IF-37: strict true/false (case-insensitive); absent/blank = no filter. */
+	static Boolean parseB2b(String b2b) {
+		if (isBlank(b2b)) {
+			return null;
+		}
+		return switch (b2b.trim().toLowerCase(Locale.ROOT)) {
+			case "true" -> Boolean.TRUE;
+			case "false" -> Boolean.FALSE;
+			default -> throw new InvalidParameterException("b2b", "b2b must be true or false");
 		};
 	}
 
