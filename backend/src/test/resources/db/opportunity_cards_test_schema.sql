@@ -6,6 +6,7 @@
 -- so running the tests against a real DATABASE_URL can never touch public tables.
 -- Executed as one statement (see @SqlConfig in the tests) because of the DO block.
 create schema if not exists if_test;
+drop table if exists if_test.ingestion_runs cascade;
 drop table if exists if_test.card_signals cascade;
 drop table if exists if_test.raw_signals cascade;
 drop table if exists if_test.opportunity_cards cascade;
@@ -58,6 +59,22 @@ create table if_test.card_signals (
   card_id   bigint not null references if_test.opportunity_cards (id) on delete cascade,
   signal_id bigint not null references if_test.raw_signals (id)       on delete cascade,
   primary key (card_id, signal_id)
+);
+-- Mirror of supabase/migrations/20261117120100_ingestion_runs.sql (IF-23).
+create table if_test.ingestion_runs (
+  id              bigint generated always as identity primary key,
+  source_platform text        not null,
+  started_at      timestamptz not null default now(),
+  finished_at     timestamptz,
+  status          text        not null,
+  fetched_count   integer     not null default 0,
+  inserted_count  integer     not null default 0,
+  skipped_count   integer     not null default 0,
+  error_summary   text,
+  constraint ingestion_runs_source_chk check (source_platform in
+    ('reddit','github','hackernews','stackexchange','g2','capterra','other')),
+  constraint ingestion_runs_status_chk check (status in ('Success','Partial','Failed')),
+  constraint ingestion_runs_counts_chk check (fetched_count >= 0 and inserted_count >= 0 and skipped_count >= 0)
 );
 do $$
 begin

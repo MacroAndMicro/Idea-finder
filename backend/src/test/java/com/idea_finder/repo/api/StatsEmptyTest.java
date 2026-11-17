@@ -46,4 +46,18 @@ class StatsEmptyTest {
 			.andExpect(jsonPath("$.signals_by_source.hackernews").value(0))
 			.andExpect(jsonPath("$.signals_by_source.stackexchange").value(0));
 	}
+
+	/** IF-23: every Phase 1 source is listed with null last run when ingestion_runs is empty. */
+	@Test
+	void lastRunsNullWhenNoRuns() throws Exception {
+		mvc.perform(get("/api/stats"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.last_runs", not(hasKey("g2"))))
+			.andExpect(jsonPath("$.last_runs.reddit", hasKey("last_run_at")))
+			.andExpect(jsonPath("$.last_runs.reddit", hasKey("last_run_status")))
+			.andExpect(jsonPath("$.last_runs.reddit.last_run_at").doesNotExist())
+			.andExpect(jsonPath("$.last_runs.github.last_run_status").doesNotExist())
+			.andExpect(jsonPath("$.last_runs.hackernews.last_run_at").doesNotExist())
+			.andExpect(jsonPath("$.last_runs.stackexchange.last_run_status").doesNotExist());
+	}
 }

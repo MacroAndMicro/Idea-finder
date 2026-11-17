@@ -27,3 +27,12 @@ values
   (4, 'reddit', 't3_abc', 'https://reddit.com/r/x/abc', 'Unlinked', 'b', null, 1, 0,
    '2026-11-16T00:00:00Z', '2026-11-16T12:00:00Z', null, null);
 insert into if_test.card_signals (card_id, signal_id) values (1, 1), (1, 2), (2, 3);
+
+-- Ingestion runs (IF-23): github ran twice (latest Partial), hackernews once with no finished_at,
+-- reddit and stackexchange never ran. error_summary is set so tests can prove it is never exposed.
+insert into if_test.ingestion_runs
+  (source_platform, started_at, finished_at, status, fetched_count, inserted_count, skipped_count, error_summary)
+values
+  ('github',     '2026-11-15T00:00:00Z', '2026-11-15T00:05:00Z', 'Success', 10, 10, 0, null),
+  ('github',     '2026-11-16T00:00:00Z', '2026-11-16T00:02:00Z', 'Partial',  4,  3, 1, 'secret-ish error detail'),
+  ('hackernews', '2026-11-16T06:00:00Z', null,                   'Failed',   0,  0, 0, 'timeout');

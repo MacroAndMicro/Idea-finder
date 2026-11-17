@@ -14,5 +14,15 @@ public record StatsResponse(
 		@JsonProperty("signals_by_source") Map<String, Long> signalsBySource,
 		@JsonProperty("unprocessed_signals") long unprocessedSignals,
 		@JsonInclude(JsonInclude.Include.ALWAYS)
-		@JsonProperty("last_signal_fetched_at") OffsetDateTime lastSignalFetchedAt) {
+		@JsonProperty("last_signal_fetched_at") OffsetDateTime lastSignalFetchedAt,
+		@JsonProperty("last_runs") Map<String, LastRun> lastRuns) {
+
+	/** Latest ingestion run of one source (IF-23); both fields are null when it never ran. */
+	@JsonInclude(JsonInclude.Include.ALWAYS)
+	public record LastRun(
+			@JsonProperty("last_run_at") OffsetDateTime lastRunAt,
+			@JsonProperty("last_run_status") String lastRunStatus) {
+
+		static final LastRun NEVER = new LastRun(null, null);
+	}
 }

@@ -1,8 +1,12 @@
 package com.idea_finder.repo.api;
 
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -44,6 +48,33 @@ class StatsControllerTest {
 			.andExpect(jsonPath("$.signals_by_source.reddit").value(1))
 			.andExpect(jsonPath("$.unprocessed_signals").value(2))
 			.andExpect(jsonPath("$.last_signal_fetched_at").value("2026-11-16T12:00:00Z"));
+	}
+
+	@Test
+	void lastRunPerSource() throws Exception {
+		mvc.perform(get("/api/stats"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.last_runs.keys()").value(
+				contains("reddit", "github", "hackernews", "stackexchange")))
+			// latest of two github runs, timestamp = finished_at
+			.andExpect(jsonPath("$.last_runs.github.last_run_at").value("2026-11-16T00:02:00Z"))
+			.andExpect(jsonPath("$.last_runs.github.last_run_status").value("Partial"))
+			// no finished_at: falls back to started_at
+			.andExpect(jsonPath("$.last_runs.hackernews.last_run_at").value("2026-11-16T06:00:00Z"))
+			.andExpect(jsonPath("$.last_runs.hackernews.last_run_status").value("Failed"))
+			.andExpect(jsonPath("$.last_runs.reddit", hasKey("last_run_at")))
+			.andExpect(jsonPath("$.last_runs.reddit.last_run_at").doesNotExist())
+			.andExpect(jsonPath("$.last_runs.reddit.last_run_status").doesNotExist())
+			// counts and error text are never exposed
+			.andExpect(content().string(not(containsString("secret-ish"))))
+			.andExpect(content().string(not(containsString("error_summary"))));
+	}
+
+	@Test
+	void existingFieldsUnchanged() throws Exception {
+		mvc.perform(get("/api/stats"))
+			.andExpect(jsonPath("$.keys()").value(contains("total_cards", "cards_by_source", "total_signals",
+				"signals_by_source", "unprocessed_signals", "last_signal_fetched_at", "last_runs")));
 	}
 
 	@Test
