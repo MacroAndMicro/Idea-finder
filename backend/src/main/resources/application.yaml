@@ -1,3 +1,17 @@
 spring:
   application:
     name: repo
+  # Local dev: read the repo-root .env (KEY=VALUE is valid properties syntax).
+  # Real environment variables (CI, prod) take precedence.
+  config:
+    import: optional:file:../.env[.properties]
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USER}
+    password: ${DATABASE_PASSWORD}
+  # Schema is owned by supabase/migrations/, not Flyway or Hibernate.
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: none
