@@ -1,0 +1,45 @@
+/** Mirrors the backend CardResponse / PageResponse DTOs (GET /api/cards). */
+export type EconomicIntent = "High" | "Medium" | "Low" | "Unspecified";
+
+export type SourcePlatform =
+  | "reddit"
+  | "github"
+  | "hackernews"
+  | "stackexchange"
+  | "g2"
+  | "capterra"
+  | "other";
+
+export interface OpportunityCard {
+  id: number;
+  title: string;
+  problem_statement: string | null;
+  trigger_context: string | null;
+  market_size: string | null;
+  duct_tape_solutions: string | null;
+  economic_intent: EconomicIntent | null;
+  mvp_wedge: string | null;
+  confidence_score: number | null;
+  source_platform: SourcePlatform;
+  source_url: string | null;
+  raw_content_snippet: string | null;
+  created_at: string;
+}
+
+export interface PageResponse<T> {
+  items: T[];
+  page: number;
+  size: number;
+  total_elements: number;
+  total_pages: number;
+}
+
+export const SOURCE_LABELS: Record<SourcePlatform, string> = {
+  reddit: "Reddit",
+  github: "GitHub",
+  hackernews: "Hacker News",
+  stackexchange: "Stack Exchange",
+  g2: "G2",
+  capterra: "Capterra",
+  other: "Other",
+};
