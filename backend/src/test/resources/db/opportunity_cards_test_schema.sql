@@ -49,6 +49,7 @@ create table if_test.raw_signals (
   fetched_at         timestamptz not null default now(),
   processed_at       timestamptz,
   content_hash       text,
+  embedding_model    text,
   constraint raw_signals_source_chk check (source_platform in
     ('reddit','github','hackernews','stackexchange','g2','capterra','other')),
   constraint raw_signals_source_external_uq unique (source_platform, external_id)
@@ -63,5 +64,7 @@ begin
   if exists (select 1 from pg_available_extensions where name = 'vector') then
     create extension if not exists vector;
     alter table if_test.opportunity_cards add column embedding vector(1536);
+    -- Mirror of supabase/migrations/20261117120000_signal_extractions.sql (IF-22).
+    alter table if_test.raw_signals add column embedding vector(1536);
   end if;
 end $$;
