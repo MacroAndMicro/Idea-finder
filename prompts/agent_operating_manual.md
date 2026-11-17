@@ -50,7 +50,7 @@ Agents connect with `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`. RLS is enabled
 1. **Inbox first.** Read `agent_inbox` rows where (`agent` = you or `All agents`) and `status` = `Open`, plus rows where `sender` = you and `status` = `Answered` (answers to your earlier questions). Founder instructions come first in your plan, within your hard rules.
 2. **Do your role's work** (your prompt).
 3. **Close the loop.** For each message you acted on: if it was addressed to you, write your reply in `answer` and set `Answered` (or `Handled` if no reply is needed); if it was an answer to your question, set `Handled`. Never leave a message you handled in `Open`.
-4. **Report — always, even if the run failed or found nothing.** Insert one `agent_run_reports` row, then print a short summary.
+4. **Report — always, even if the run failed or found nothing.** Insert one `agent_run_reports` row, then print a short summary. If anything from this run now waits on the founder (an MR to review and merge, an inbox question, a blocker, a rollback), also send ONE push notification (PushNotification tool) that says what is needed and includes the MR or ticket link. No notification when nothing needs the founder.
 
 ## 5. Ticket rules
 - **Claiming:** re-read the ticket right before claiming. Only claim if it is still `To Do` and assigned to you (or a queue your prompt allows). Then set `In Progress`. One agent per ticket.
