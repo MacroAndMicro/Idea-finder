@@ -146,3 +146,22 @@ class SupabaseStore:
     def mark_processed(self, signal_id: int, when: datetime) -> None:
         self.patch(RAW_SIGNALS_TABLE, {"id": f"eq.{int(signal_id)}"},
                    {"processed_at": when.isoformat()})
+
+    def fetch_signals_to_embed(self, limit: int, *, pain_only: bool = True
+                               ) -> list[dict[str, Any]]:
+        """raw_signals with a null embedding; by default only B2B pain points."""
+        params: dict[str, Any] = {
+            "select": "id,title,body",
+            "embedding": "is.null",
+            "order": "id.asc",
+            "limit": limit,
+        }
+        if pain_only:
+            params["select"] = "id,title,body,signal_extractions!inner(is_pain_point,is_b2b)"
+            params["signal_extractions.is_pain_point"] = "is.true"
+            params["signal_extractions.is_b2b"] = "is.true"
+        return self.select(RAW_SIGNALS_TABLE, params)
+
+    def save_signal_embedding(self, signal_id: int, vector: str, model: str) -> None:
+        self.patch(RAW_SIGNALS_TABLE, {"id": f"eq.{int(signal_id)}"},
+                   {"embedding": vector, "embedding_model": model})

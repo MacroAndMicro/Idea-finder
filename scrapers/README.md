@@ -13,6 +13,7 @@ scrapers/
   store.py           SupabaseStore: idempotent insert into raw_signals (+ ingestion_runs if present)
   cluster.py         pure clustering of pain-point signals + 1–100 confidence score
   ingest.py          CLI: python -m scrapers.ingest --source {hackernews,github,stackexchange}
+  embed.py           CLI: python -m scrapers.embed — 1536-d embeddings on raw_signals
   extract.py         CLI: python -m scrapers.extract — per-signal LLM extraction → signal_extractions
   llm/               provider-agnostic LLMClient / EmbeddingClient: base, factory, fake, gemini
   llm/prompts/       versioned prompts (extract_signal_v1); never edited after shipping
@@ -53,6 +54,19 @@ Takes `raw_signals` with `processed_at` null (oldest first), runs prompt
 - Post text is untrusted: fenced in `<signal>` tags, delimiter look-alikes neutralised,
   title/body truncated (300/6000 chars); the system prompt forbids following it and
   forbids inventing facts (null / `Unspecified` when absent).
+
+## Embed (raw_signals)
+
+```
+python -m scrapers.embed [--limit 100] [--all] [--dry-run]
+```
+
+Embeds `title + body` (truncated to 8000 chars) for `raw_signals` with a null
+`embedding`, in batches of 32, via the `EMBEDDING_*`-selected client; writes
+`embedding` (exactly 1536 dims, else rejected) and `embedding_model`.
+**Choice:** by default only signals whose extraction is `is_pain_point` and `is_b2b`
+(the only ones clustering uses), so run `scrapers.extract` first; `--all` embeds
+every signal regardless.
 
 ## Clustering & confidence (`cluster.py`)
 
