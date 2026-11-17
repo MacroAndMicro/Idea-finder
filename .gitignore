@@ -4,7 +4,6 @@
 
 # Java / Spring Boot Target & IDE
 backend/target/
-backend/.mvn/
 *.class
 .idea/
 *.iml
