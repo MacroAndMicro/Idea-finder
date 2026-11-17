@@ -8,6 +8,7 @@ import java.util.Locale;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.repository.Repository;
 
@@ -20,6 +21,12 @@ public interface OpportunityCardRepository
 	java.util.Optional<OpportunityCard> findById(Long id);
 
 	boolean existsById(Long id);
+
+	long count();
+
+	/** Rows of [SourcePlatform, Long count]. */
+	@Query("select c.sourcePlatform, count(c) from OpportunityCard c group by c.sourcePlatform")
+	List<Object[]> countBySource();
 
 	/**
 	 * Pageable search. Every filter is optional (null = not filtered).
