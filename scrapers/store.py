@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from scrapers import config
@@ -22,6 +23,7 @@ log = logging.getLogger(__name__)
 
 RAW_SIGNALS_TABLE = "raw_signals"
 INGESTION_RUNS_TABLE = "ingestion_runs"
+SIGNAL_EXTRACTIONS_TABLE = "signal_extractions"
 CONFLICT_COLUMNS = "source_platform,external_id"
 BATCH_SIZE = 200  # rows per POST; keeps payloads well under PostgREST limits
 
@@ -108,6 +110,58 @@ class SupabaseStore:
                 return False
             self._post(INGESTION_RUNS_TABLE, [dict(row)], "return=minimal")
         except HttpError as exc:
-            log.warning("could not write %s row: %s", INGESTION_RUNS_TABLE, exc)
+            # Status only: the exception text can contain a request URL.
+            log.warning("could not write %s row: rejected with HTTP %s",
+                        INGESTION_RUNS_TABLE, exc.status)
             return False
         return True
+
+    # ---- generic helpers for the LLM pipeline (extract / embed) ----
+
+    def select(self, table: str, params: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """GET rows with PostgREST query params (filters, select, order, limit)."""
+        resp = self.client.get(f"{self._base}/{table}", params, self._headers)
+        data = resp.json() if resp.body else []
+        return data if isinstance(data, list) else []
+
+    def patch(self, table: str, filters: Mapping[str, str], values: Mapping[str, Any]) -> None:
+        query = "&".join(f"{k}={v}" for k, v in filters.items())
+        self.client.patch_json(f"{self._base}/{table}?{query}", dict(values),
+                               {**self._headers, "Prefer": "return=minimal"})
+
+    def fetch_unprocessed_signals(self, limit: int) -> list[dict[str, Any]]:
+        """raw_signals not yet extracted, oldest id first."""
+        return self.select(RAW_SIGNALS_TABLE, {
+            "select": "id,source_platform,title,body,tags",
+            "processed_at": "is.null",
+            "order": "id.asc",
+            "limit": limit,
+        })
+
+    def save_extraction(self, row: Mapping[str, Any]) -> None:
+        """Upsert one signal_extractions row (unique on signal_id)."""
+        self._post(SIGNAL_EXTRACTIONS_TABLE, [dict(row)],
+                   "resolution=merge-duplicates,return=minimal", "?on_conflict=signal_id")
+
+    def mark_processed(self, signal_id: int, when: datetime) -> None:
+        self.patch(RAW_SIGNALS_TABLE, {"id": f"eq.{int(signal_id)}"},
+                   {"processed_at": when.isoformat()})
+
+    def fetch_signals_to_embed(self, limit: int, *, pain_only: bool = True
+                               ) -> list[dict[str, Any]]:
+        """raw_signals with a null embedding; by default only B2B pain points."""
+        params: dict[str, Any] = {
+            "select": "id,title,body",
+            "embedding": "is.null",
+            "order": "id.asc",
+            "limit": limit,
+        }
+        if pain_only:
+            params["select"] = "id,title,body,signal_extractions!inner(is_pain_point,is_b2b)"
+            params["signal_extractions.is_pain_point"] = "is.true"
+            params["signal_extractions.is_b2b"] = "is.true"
+        return self.select(RAW_SIGNALS_TABLE, params)
+
+    def save_signal_embedding(self, signal_id: int, vector: str, model: str) -> None:
+        self.patch(RAW_SIGNALS_TABLE, {"id": f"eq.{int(signal_id)}"},
+                   {"embedding": vector, "embedding_model": model})

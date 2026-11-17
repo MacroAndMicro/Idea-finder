@@ -164,6 +164,12 @@ class HttpClient:
         merged = {**self._headers, "Content-Type": "application/json", **(headers or {})}
         return self.send(HttpRequest("POST", url, merged, json.dumps(payload).encode()))
 
+    def patch_json(
+        self, url: str, payload: Any, headers: Mapping[str, str] | None = None
+    ) -> HttpResponse:
+        merged = {**self._headers, "Content-Type": "application/json", **(headers or {})}
+        return self.send(HttpRequest("PATCH", url, merged, json.dumps(payload).encode()))
+
     def send(self, request: HttpRequest) -> HttpResponse:
         attempt = 0
         while True:
