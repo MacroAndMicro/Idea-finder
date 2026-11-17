@@ -23,11 +23,12 @@ public class CardController {
 	public PageResponse<CardResponse> list(
 			@RequestParam(required = false) Integer page,
 			@RequestParam(required = false) Integer size,
+			@RequestParam(required = false) String q,
 			@RequestParam(required = false) String source,
 			@RequestParam(required = false) BigDecimal minConfidence,
 			@RequestParam(required = false) String intent,
 			@RequestParam(required = false) String sort) {
-		return cards.list(page, size, source, minConfidence, intent, sort);
+		return cards.list(page, size, q, source, minConfidence, intent, sort);
 	}
 
 	@GetMapping("/{id}")
