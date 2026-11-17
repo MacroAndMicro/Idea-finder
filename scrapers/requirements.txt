@@ -1,0 +1,4 @@
+# Runtime: standard library only (urllib, gzip, json, hashlib) — no third-party deps.
+# Dev / CI tooling, pinned:
+pytest==9.1.1
+ruff==0.16.9

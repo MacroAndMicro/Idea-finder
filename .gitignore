@@ -13,3 +13,10 @@ frontend/node_modules/
 frontend/dist/
 .DS_Store
 coverage/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
