@@ -136,7 +136,9 @@ public class CardQueryService {
 		return switch (value) {
 			case "confidence" -> Sort.by(Sort.Order.desc("confidenceScore").nullsLast()).and(newest);
 			case "newest" -> newest;
-			default -> throw new InvalidParameterException("sort", "sort must be one of: confidence, newest");
+			// IF-35: most recently seen in the sources first; cards without signal dates last.
+			case "recent" -> Sort.by(Sort.Order.desc("lastSeenAt").nullsLast(), Sort.Order.desc("id"));
+			default -> throw new InvalidParameterException("sort", "sort must be one of: confidence, newest, recent");
 		};
 	}
 
