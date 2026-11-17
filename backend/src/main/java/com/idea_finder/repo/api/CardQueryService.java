@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.idea_finder.repo.domain.EconomicIntent;
 import com.idea_finder.repo.domain.OpportunityCardRepository;
+import com.idea_finder.repo.domain.RawSignalRepository;
 import com.idea_finder.repo.domain.SourcePlatform;
 
 /** Validates card list parameters and runs read-only queries. */
@@ -23,15 +24,51 @@ public class CardQueryService {
 	public static final int MAX_SIZE = 50;
 	/** Guards against huge OFFSETs (page * size) hitting the database. */
 	public static final int MAX_PAGE = 10_000;
+	public static final int MIN_Q = 2;
+	public static final int MAX_Q = 100;
 
 	private final OpportunityCardRepository repository;
+	private final RawSignalRepository signals;
 
-	public CardQueryService(OpportunityCardRepository repository) {
+	public CardQueryService(OpportunityCardRepository repository, RawSignalRepository signals) {
 		this.repository = repository;
+		this.signals = signals;
 	}
 
 	public PageResponse<CardResponse> list(Integer page, Integer size, String source,
 			BigDecimal minConfidence, String intent, String sort) {
+		return list(page, size, null, source, minConfidence, intent, sort);
+	}
+
+	public PageResponse<CardResponse> list(Integer page, Integer size, String q, String source,
+			BigDecimal minConfidence, String intent, String sort) {
+		String keyword = parseQuery(q);
+		if (minConfidence != null
+				&& (minConfidence.compareTo(BigDecimal.ZERO) < 0 || minConfidence.compareTo(BigDecimal.valueOf(100)) > 0)) {
+			throw new InvalidParameterException("minConfidence", "minConfidence must be between 0 and 100");
+		}
+		PageRequest pageable = pageRequest(page, size, parseSort(sort));
+		return PageResponse.of(
+			repository.search(keyword, parseSource(source), minConfidence, parseIntent(intent), pageable),
+			CardResponse::from);
+	}
+
+	public CardResponse get(long id) {
+		return repository.findById(id).map(CardResponse::from).orElseThrow(() -> new CardNotFoundException(id));
+	}
+
+	/** Evidence behind a card: its linked raw signals, newest source post first. */
+	public PageResponse<SignalResponse> signals(long cardId, Integer page, Integer size) {
+		PageRequest pageable = pageRequest(page, size,
+			Sort.by(Sort.Order.desc("sourceCreatedAt").nullsLast(), Sort.Order.desc("id")));
+		if (!repository.existsById(cardId)) {
+			throw new CardNotFoundException(cardId);
+		}
+		return PageResponse.of(signals.findByCardId(cardId, pageable), SignalResponse::from);
+	}
+
+	/** Shared paging limits for every list endpoint. */
+	static PageRequest pageRequest(Integer page, Integer size, Sort sort) {
 		int p = page == null ? 0 : page;
 		int s = size == null ? DEFAULT_SIZE : size;
 		if (p < 0 || p > MAX_PAGE) {
@@ -40,18 +77,20 @@ public class CardQueryService {
 		if (s < 1 || s > MAX_SIZE) {
 			throw new InvalidParameterException("size", "size must be between 1 and " + MAX_SIZE);
 		}
-		if (minConfidence != null
-				&& (minConfidence.compareTo(BigDecimal.ZERO) < 0 || minConfidence.compareTo(BigDecimal.valueOf(100)) > 0)) {
-			throw new InvalidParameterException("minConfidence", "minConfidence must be between 0 and 100");
-		}
-		PageRequest pageable = PageRequest.of(p, s, parseSort(sort));
-		return PageResponse.of(
-			repository.search(parseSource(source), minConfidence, parseIntent(intent), pageable),
-			CardResponse::from);
+		return PageRequest.of(p, s, sort);
 	}
 
-	public CardResponse get(long id) {
-		return repository.findById(id).map(CardResponse::from).orElseThrow(() -> new CardNotFoundException(id));
+	/** Trimmed keyword, or null when absent/blank; length is bounded to keep LIKE scans cheap. */
+	static String parseQuery(String q) {
+		if (isBlank(q)) {
+			return null;
+		}
+		String value = q.trim();
+		int length = value.codePointCount(0, value.length());
+		if (length < MIN_Q || length > MAX_Q) {
+			throw new InvalidParameterException("q", "q must be between " + MIN_Q + " and " + MAX_Q + " characters");
+		}
+		return value;
 	}
 
 	static Sort parseSort(String sort) {

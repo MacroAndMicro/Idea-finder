@@ -23,15 +23,25 @@ public class CardController {
 	public PageResponse<CardResponse> list(
 			@RequestParam(required = false) Integer page,
 			@RequestParam(required = false) Integer size,
+			@RequestParam(required = false) String q,
 			@RequestParam(required = false) String source,
 			@RequestParam(required = false) BigDecimal minConfidence,
 			@RequestParam(required = false) String intent,
 			@RequestParam(required = false) String sort) {
-		return cards.list(page, size, source, minConfidence, intent, sort);
+		return cards.list(page, size, q, source, minConfidence, intent, sort);
 	}
 
 	@GetMapping("/{id}")
 	public CardResponse get(@PathVariable long id) {
 		return cards.get(id);
+	}
+
+	/** The raw signals (evidence) a card is anchored in. */
+	@GetMapping("/{id}/signals")
+	public PageResponse<SignalResponse> signals(
+			@PathVariable long id,
+			@RequestParam(required = false) Integer page,
+			@RequestParam(required = false) Integer size) {
+		return cards.signals(id, page, size);
 	}
 }
