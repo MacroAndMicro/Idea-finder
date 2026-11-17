@@ -112,13 +112,18 @@ public class CardQueryService {
 
 	/** Shared paging limits for every list endpoint. */
 	static PageRequest pageRequest(Integer page, Integer size, Sort sort) {
+		return pageRequest(page, size, sort, MAX_SIZE);
+	}
+
+	/** As {@link #pageRequest(Integer, Integer, Sort)} with an endpoint-specific maximum size. */
+	static PageRequest pageRequest(Integer page, Integer size, Sort sort, int maxSize) {
 		int p = page == null ? 0 : page;
 		int s = size == null ? DEFAULT_SIZE : size;
 		if (p < 0 || p > MAX_PAGE) {
 			throw new InvalidParameterException("page", "page must be between 0 and " + MAX_PAGE);
 		}
-		if (s < 1 || s > MAX_SIZE) {
-			throw new InvalidParameterException("size", "size must be between 1 and " + MAX_SIZE);
+		if (s < 1 || s > maxSize) {
+			throw new InvalidParameterException("size", "size must be between 1 and " + maxSize);
 		}
 		return PageRequest.of(p, s, sort);
 	}
