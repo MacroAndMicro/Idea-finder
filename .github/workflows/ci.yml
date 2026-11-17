@@ -1,0 +1,157 @@
+# CI for Idea Finder, running on the GitHub mirror of the GitLab repo.
+# GitLab push-mirrors every branch here; this workflow tests it and reports
+# the result back to GitLab as the commit status "github-actions", which
+# GitLab's "Pipelines must succeed" merge check enforces.
+#
+# Required repo secret: GITLAB_STATUS_TOKEN (GitLab project access token, scope `api`).
+
+name: CI
+
+on:
+  push:
+    branches-ignore: [main]   # MR branches only; saves minutes
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GITLAB_PROJECT_ID: "88758358"
+  STATUS_NAME: github-actions
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.diff.outputs.backend }}
+      frontend: ${{ steps.diff.outputs.frontend }}
+      scrapers: ${{ steps.diff.outputs.scrapers }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Report "running" to GitLab
+        env:
+          TOKEN: ${{ secrets.GITLAB_STATUS_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "::warning::GITLAB_STATUS_TOKEN not set; GitLab won't see results"; exit 0; fi
+          curl -sf -X POST -H "PRIVATE-TOKEN: $TOKEN" \
+            "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/statuses/$GITHUB_SHA" \
+            --data-urlencode "state=running" --data-urlencode "name=$STATUS_NAME" \
+            --data-urlencode "ref=$GITHUB_REF_NAME" \
+            --data-urlencode "target_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
+      - name: Detect changed areas (vs main)
+        id: diff
+        run: |
+          base=$(git merge-base origin/main HEAD 2>/dev/null || echo "")
+          if [ -z "$base" ]; then files=$(git ls-files); else files=$(git diff --name-only "$base" HEAD); fi
+          echo "$files"
+          ci=$(echo "$files" | grep -q '^\.github/workflows/' && echo true || echo false)
+          has() { echo "$files" | grep -Eq "$1" && echo true || echo "$ci"; }
+          echo "backend=$(has '^(backend|supabase)/')" >> "$GITHUB_OUTPUT"
+          echo "frontend=$(has '^frontend/')" >> "$GITHUB_OUTPUT"
+          if [ -n "$(find scrapers -name '*.py' 2>/dev/null | head -1)" ]; then
+            echo "scrapers=$(has '^scrapers/')" >> "$GITHUB_OUTPUT"
+          else
+            echo "scrapers=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: idea_finder_test
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ci" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: jdbc:postgresql://localhost:5432/idea_finder_test
+      DATABASE_USER: ci
+      DATABASE_PASSWORD: ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - run: chmod +x mvnw && ./mvnw -B verify
+        working-directory: backend
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  scrapers:
+    needs: changes
+    if: needs.changes.outputs.scrapers == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install --quiet ruff pytest
+          if [ -f scrapers/requirements.txt ]; then pip install --quiet -r scrapers/requirements.txt; fi
+          ruff check scrapers
+          pytest scrapers || [ $? -eq 5 ]   # 5 = no tests collected yet
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for committed secrets (gitleaks)
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz gitleaks
+          # Scan only this branch's new commits (history before main is out of scope).
+          ./gitleaks git --no-banner --redact -v --log-opts="origin/main..HEAD" .
+
+  report:
+    needs: [changes, backend, frontend, scrapers, secrets]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report final result to GitLab
+        env:
+          TOKEN: ${{ secrets.GITLAB_STATUS_TOKEN }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          state=success
+          for r in $RESULTS; do case "$r" in failure|cancelled) state=failed;; esac; done
+          echo "overall: $state"
+          if [ -n "$TOKEN" ]; then
+            curl -sf -X POST -H "PRIVATE-TOKEN: $TOKEN" \
+              "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/statuses/$GITHUB_SHA" \
+              --data-urlencode "state=$state" --data-urlencode "name=$STATUS_NAME" \
+              --data-urlencode "ref=$GITHUB_REF_NAME" \
+              --data-urlencode "description=backend/frontend/scrapers/secrets: $RESULTS" \
+              --data-urlencode "target_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
+          else
+            echo "::warning::GITLAB_STATUS_TOKEN not set; result not reported to GitLab"
+          fi
+          [ "$state" = success ]
