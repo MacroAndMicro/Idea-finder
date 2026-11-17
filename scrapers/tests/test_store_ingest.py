@@ -171,7 +171,8 @@ def test_cli_http_error_reports_failure():
     code, out = run_cli(["--source", "hackernews"], Boom({}), store)
     assert code == 1
     assert "status=failed" in out and "SECRETKEY" not in out
-    assert store.runs[0]["status"] == "failed"
+    assert store.runs[0]["status"] == "Failed"
+    assert store.runs[0]["error_summary"] == "fetch hackernews: HTTP 500"
 
 
 def test_cli_rejects_reddit_and_bad_limit():
@@ -198,3 +199,69 @@ def test_cli_partial_failure_still_stores_fetched():
     code, out = run_cli(["--source", "hackernews", "--query", "q"], Half({}), store)
     assert code == 1 and "status=partial" in out
     assert [s.external_id for s in store.signals] == ["1"]
+
+
+RUN_KEYS = {"source_platform", "started_at", "finished_at", "status", "fetched_count",
+            "inserted_count", "skipped_count", "error_summary"}
+
+
+def test_record_run_payload_success():
+    store = StubStore()
+    run_cli(["--source", "hackernews", "--query", "a"], StubAdapter({"a": [sig(1), sig(2)]}),
+            store)
+    row = store.runs[0]
+    assert set(row) == RUN_KEYS
+    assert row == {
+        "source_platform": "hackernews", "started_at": NOW.isoformat(),
+        "finished_at": NOW.isoformat(), "status": "Success", "fetched_count": 2,
+        "inserted_count": 1, "skipped_count": 1, "error_summary": None,
+    }
+
+
+def test_record_run_payload_partial_has_no_url_or_secret():
+    from scrapers.http_client import HttpError
+
+    class Half(StubAdapter):
+        def fetch(self, query, since):
+            yield sig(1)
+            raise HttpError(503, "https://api.example.test/x?key=SECRETKEY")
+
+    store = StubStore()
+    code, _ = run_cli(["--source", "hackernews", "--query", "q"], Half({}), store)
+    row = store.runs[0]
+    assert code == 1 and set(row) == RUN_KEYS
+    assert row["status"] == "Partial" and row["fetched_count"] == 1
+    assert row["error_summary"] == "fetch hackernews: HTTP 503"
+    assert "SECRETKEY" not in row["error_summary"] and "http" not in row["error_summary"]
+
+
+def test_record_run_payload_failed_on_store_error_and_rate_limit():
+    from scrapers.http_client import HttpError, RateLimitExceeded
+
+    class BadStore(StubStore):
+        def upsert_signals(self, signals):
+            raise HttpError(403, "https://proj.supabase.co/rest/v1/raw_signals")
+
+    store = BadStore()
+    code, out = run_cli(["--source", "hackernews", "--query", "a"],
+                        StubAdapter({"a": [sig(1)]}), store)
+    assert code == 1 and "status=failed" in out
+    assert store.runs[0]["status"] == "Failed"
+    assert store.runs[0]["error_summary"] == "store hackernews: HTTP 403"
+
+    class Limited(StubAdapter):
+        def fetch(self, query, since):
+            raise RateLimitExceeded(429, "https://api.example.test/x", "retries exhausted")
+            yield  # pragma: no cover
+
+    store = StubStore()
+    run_cli(["--source", "hackernews"], Limited({}), store)
+    assert store.runs[0]["error_summary"] == "fetch hackernews: rate limited (HTTP 429)"
+
+
+def test_record_run_rejection_logs_warning_without_url(make_client, caplog):
+    store, _ = make_store(make_client, [ok(b"[]"), status(400)])
+    with caplog.at_level("WARNING"):
+        assert store.record_run({"status": "Success"}) is False
+    assert "HTTP 400" in caplog.text
+    assert "supabase.co" not in caplog.text and SECRET not in caplog.text

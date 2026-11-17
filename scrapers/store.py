@@ -108,6 +108,8 @@ class SupabaseStore:
                 return False
             self._post(INGESTION_RUNS_TABLE, [dict(row)], "return=minimal")
         except HttpError as exc:
-            log.warning("could not write %s row: %s", INGESTION_RUNS_TABLE, exc)
+            # Status only: the exception text can contain a request URL.
+            log.warning("could not write %s row: rejected with HTTP %s",
+                        INGESTION_RUNS_TABLE, exc.status)
             return False
         return True

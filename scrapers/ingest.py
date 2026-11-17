@@ -21,7 +21,7 @@ from scrapers.adapters.github import GitHubIssuesAdapter
 from scrapers.adapters.hackernews import HackerNewsAdapter
 from scrapers.adapters.stackexchange import StackExchangeAdapter
 from scrapers.config import MissingSecretError
-from scrapers.http_client import HttpError
+from scrapers.http_client import HttpError, RateLimitExceeded
 from scrapers.models import RawSignal
 from scrapers.store import StoreResult, SupabaseStore
 
@@ -40,6 +40,8 @@ DEFAULT_QUERIES: dict[str, tuple[str, ...]] = {
     "github": ("workaround", "feature request integration"),
     "stackexchange": ("workaround", "export"),
 }
+#: ingestion_runs.status values (CHECK constraint, IF-23 migration).
+RUN_STATUS = {"success": "Success", "partial": "Partial", "failed": "Failed"}
 DEFAULT_LIMIT = 50
 DEFAULT_SINCE_DAYS = 14
 
@@ -57,6 +59,20 @@ def collect(adapter: SourceAdapter, queries: Sequence[str], since: datetime,
                     yield signal
 
     return itertools.islice(stream(), limit)
+
+
+def error_summary(source: str, stage: str, exc: HttpError) -> str:
+    """Short, secret-free reason for ingestion_runs.error_summary.
+
+    Never ``str(exc)``: it can embed a request URL (e.g. Stack Exchange ``key=``).
+    """
+    if exc.status == 0:
+        reason = "network error"
+    elif isinstance(exc, RateLimitExceeded):
+        reason = f"rate limited (HTTP {exc.status})"
+    else:
+        reason = f"HTTP {exc.status}"
+    return f"{stage} {source}: {reason}"
 
 
 def run(argv: Sequence[str] | None = None, *,
@@ -86,7 +102,7 @@ def run(argv: Sequence[str] | None = None, *,
         print(f"error: {exc}", file=out)
         return 2
 
-    status, error = "success", None
+    status, error, summary = "success", None, None
     fetched: list[RawSignal] = []
     result = StoreResult()
     try:
@@ -94,11 +110,13 @@ def run(argv: Sequence[str] | None = None, *,
             fetched.append(signal)
     except HttpError as exc:  # keep what was fetched before the API gave up
         status, error = "partial" if fetched else "failed", str(exc)
+        summary = error_summary(args.source, "fetch", exc)
     try:
         if store is not None and fetched:
             result = store.upsert_signals(fetched)
     except HttpError as exc:
         status, error = "failed", str(exc)
+        summary = error_summary(args.source, "store", exc)
 
     if not fetched and args.source in REQUIRED_KEY and status == "success":
         print(f"note: 0 signals — is {REQUIRED_KEY[args.source]} set?", file=out)
@@ -117,11 +135,11 @@ def run(argv: Sequence[str] | None = None, *,
             "source_platform": args.source,
             "started_at": started.isoformat(),
             "finished_at": now().isoformat(),
-            "status": status,
+            "status": RUN_STATUS[status],
             "fetched_count": len(fetched),
             "inserted_count": result.inserted,
             "skipped_count": result.skipped,
-            "error": error,
+            "error_summary": summary,
         })
     return 0 if status == "success" else 1
 
