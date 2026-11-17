@@ -7,14 +7,15 @@ Python 3.12, standard library only at runtime. Phase 1 sources via **official AP
 scrapers/
   config.py          env-only config; MissingSecretError names the variable, never its value
   models.py          RawSignal (mirrors public.raw_signals) + hashing helpers
-  http.py            shared HttpClient: timeout, exponential backoff, Retry-After,
+  http_client.py     shared HttpClient: timeout, exponential backoff, Retry-After,
                      X-RateLimit-* waits, gzip, honest User-Agent (SCRAPER_USER_AGENT)
   adapters/          SourceAdapter base + hackernews, github, stackexchange
   store.py           SupabaseStore: idempotent insert into raw_signals (+ ingestion_runs if present)
   cluster.py         pure clustering of pain-point signals + 1–100 confidence score
   ingest.py          CLI: python -m scrapers.ingest --source {hackernews,github,stackexchange}
-  llm/               provider-agnostic LLMClient / EmbeddingClient (fake, gemini)
-  tests/fixtures/    recorded API responses — tests never touch the network
+  llm/               provider-agnostic LLMClient / EmbeddingClient: base, factory, fake, gemini
+  tests/             pytest suite (test_*.py, conftest.py, helpers.py)
+  tests/fixtures/    recorded API responses (github, hackernews, stackexchange) — tests never touch the network
 ```
 
 Run: `pip install -r scrapers/requirements.txt && ruff check scrapers && pytest scrapers`
