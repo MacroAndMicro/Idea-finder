@@ -5,9 +5,13 @@ import { useId, useState } from "react";
 import type { OpportunityCard } from "@/lib/types";
 import { ConfidenceMeter, IntentBadge, safeHref, SourceBadge, Spread } from "./CardMeta";
 
-function Field({ label, value, open }: { label: string; value: string | null; open: boolean }) {
+/**
+ * One card field. Collapsed list cards are a summary on small screens: only the
+ * Problem Statement shows below md (`primary`); the rest appear on "Show full card".
+ */
+function Field({ label, value, open, primary = false }: { label: string; value: string | null; open: boolean; primary?: boolean }) {
   return (
-    <div>
+    <div className={open || primary ? "" : "hidden md:block"}>
       <dt className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</dt>
       <dd className={`mt-1 text-sm ${open ? "" : "line-clamp-3"}`}>{value || "Not provided"}</dd>
     </div>
@@ -19,7 +23,7 @@ export default function OpportunityCardView({ card }: { card: OpportunityCard })
   const id = useId();
   const sourceHref = safeHref(card.source_url);
   return (
-    <article className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-4" aria-labelledby={id}>
+    <article className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 md:gap-4" aria-labelledby={id}>
       <header className="flex flex-col gap-2">
         <h2 id={id} className="text-base font-semibold leading-snug">
           <Link href={`/cards/${card.id}`} className="rounded underline-offset-4 hover:text-accent hover:underline">
@@ -34,7 +38,7 @@ export default function OpportunityCardView({ card }: { card: OpportunityCard })
         <ConfidenceMeter score={card.confidence_score} />
       </header>
       <dl className="flex flex-col gap-3">
-        <Field label="Problem statement" value={card.problem_statement} open={open} />
+        <Field label="Problem statement" value={card.problem_statement} open={open} primary />
         <Field label="Trigger context & frequency" value={card.trigger_context} open={open} />
         <Field label="Market size / segment" value={card.market_size} open={open} />
         <Field label="Duct-tape solutions" value={card.duct_tape_solutions} open={open} />
