@@ -43,6 +43,9 @@ logging:
     level: "%5p [%X{requestId:-}]"
 
 app:
+  cache:
+    # IF-68: Cache-Control max-age on /api/stats and /api/cards/facets (0 = no header).
+    aggregate-max-age: ${API_AGGREGATE_CACHE_MAX_AGE:60s}
   rate-limit:
     # IF-67: per-client-IP token bucket on /api/** (/api/health exempt).
     per-minute: ${API_RATE_LIMIT_PER_MINUTE:120}
