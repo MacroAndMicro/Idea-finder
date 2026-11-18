@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { errorMessage, fetchCards, fetchFacets, queryFromParams, queryToParams, type CardQuery } from "@/lib/api";
 import type { Facets, OpportunityCard, PageResponse } from "@/lib/types";
@@ -9,7 +9,7 @@ import SearchBox from "./SearchBox";
 
 // min-w keeps selects from changing width when facet counts arrive.
 const selectCls =
-  "min-h-11 min-w-44 rounded border border-border bg-surface px-2 text-sm text-foreground tabular-nums";
+  "min-h-11 w-full min-w-44 rounded border border-border bg-surface px-2 text-sm text-foreground tabular-nums md:w-auto";
 
 /** "Reddit (9)" once facets are in; just "Reddit" while loading or if facets failed. */
 function withCount(label: string, n: number | undefined): string {
@@ -72,12 +72,44 @@ export default function CardList() {
   const intent = facets?.economic_intent;
 
   const set = (patch: Partial<CardQuery>) => setQuery({ ...query, ...patch, page: 0 });
+
+  // Below md the filters sit behind a disclosure so results start above the fold.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersId = useId();
+  const activeFilters = [query.source, query.intent, query.minConfidence, query.b2b].filter(Boolean).length;
+  const sortChanged = query.sort !== "confidence";
   const onSearch = useCallback((q: string | undefined) => setQuery({ ...query, q, page: 0 }), [query, setQuery]);
 
   return (
     <div className="flex flex-col gap-6">
       <SearchBox value={query.q ?? ""} onSearch={onSearch} />
-      <form className="flex flex-wrap items-end gap-4" aria-label="Filter opportunities" onSubmit={(e) => e.preventDefault()}>
+      <button
+        type="button"
+        aria-expanded={filtersOpen}
+        aria-controls={filtersId}
+        onClick={() => setFiltersOpen((o) => !o)}
+        className="-mt-2 inline-flex min-h-11 items-center justify-between gap-2 self-start rounded border border-border bg-surface px-4 text-sm font-medium md:hidden"
+      >
+        <span>
+          Filters &amp; sort
+          {activeFilters > 0 && (
+            <span className="ml-2 rounded-full bg-accent px-2 py-0.5 text-xs font-semibold text-accent-foreground tabular-nums">
+              {activeFilters}
+              <span className="sr-only"> active {activeFilters === 1 ? "filter" : "filters"}</span>
+            </span>
+          )}
+          {sortChanged && <span className="ml-2 text-xs text-muted">· sorted</span>}
+        </span>
+        <span aria-hidden="true" className={`transition-transform ${filtersOpen ? "rotate-180" : ""}`}>
+          ▾
+        </span>
+      </button>
+      <form
+        id={filtersId}
+        className={`${filtersOpen ? "grid" : "hidden"} grid-cols-1 gap-4 min-[480px]:grid-cols-2 md:flex md:flex-wrap md:items-end`}
+        aria-label="Filter opportunities"
+        onSubmit={(e) => e.preventDefault()}
+      >
         <label className="flex flex-col gap-1 text-sm font-medium">
           Source
           <select className={selectCls} value={query.source ?? ""} onChange={(e) => set({ source: e.target.value })}>
