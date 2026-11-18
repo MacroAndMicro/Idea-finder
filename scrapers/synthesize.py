@@ -12,7 +12,12 @@
      from the cluster's evidence only; output is schema-validated (one retry). The
      card text is embedded and compared with existing cards: cosine similarity >=
      ``CARD_DUPLICATE_THRESHOLD`` → merged into that card instead of inserting.
-     Otherwise a new ``opportunity_cards`` row + ``card_signals`` links are written.
+     Otherwise a new ``opportunity_cards`` row + its ``card_signals`` links are written
+     atomically (SQL function ``insert_card_with_links``, IF-48).
+   - **Rejected before** (IF-48): a cluster the LLM rejected (``valid_opportunity``
+     false) or answered invalidly is remembered in ``synthesis_rejections`` by its
+     fingerprint (prompt version + sorted signal ids) and skipped with no LLM call until
+     its signal set (or the prompt) changes, so it cannot eat the daily budget forever.
 
 Never invented by the model: counts, platforms, dates (computed here and appended to
 ``trigger_context``), ``economic_intent`` (strongest intent stated in the cluster's
@@ -27,6 +32,7 @@ left for the next run. ``--dry-run`` clusters and reports, with no LLM call and 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import sys
@@ -105,6 +111,7 @@ class SynthStats:
     llm_calls: int = 0
     errors: int = 0
     would_create: int = 0
+    skipped_rejected: int = 0
     card_ids: list[int] = field(default_factory=list)
 
 
@@ -224,6 +231,13 @@ def card_text(card: dict[str, Any]) -> str:
     return f"{card['title']}\n\n{card['problem_statement']}"
 
 
+def cluster_fingerprint(signal_ids: Iterable[int],
+                        prompt_version: str = prompt_v1.PROMPT_VERSION) -> str:
+    """Stable id of a cluster's exact signal set for one prompt version (IF-48)."""
+    ids = ",".join(str(i) for i in sorted({int(s) for s in signal_ids}))
+    return hashlib.sha256(f"{prompt_version}:{ids}".encode()).hexdigest()
+
+
 def overlap_match(ids: set[int], links: dict[int, set[int]]) -> int | None:
     best, best_share = None, 0.0
     for card_id in sorted(links):
@@ -249,6 +263,7 @@ class Synthesizer:
         self.cards: dict[int, list[float]] = {}
         self.card_when: dict[int, str] = {}
         self.evidence: dict[int, Evidence] = {}
+        self.rejected: set[str] = set()
 
     def load(self) -> list[Evidence]:
         items = [e for e in map(to_evidence, self.store.fetch_cluster_candidates()) if e]
@@ -261,7 +276,19 @@ class Synthesizer:
             if usable_vector(vec):
                 self.cards[card_id] = vec
             self.card_when[card_id] = (row.get("trigger_context") or "").split(FREQ_MARKER)[0]
+        self.rejected = self.store.fetch_rejection_fingerprints()
         return items
+
+    def remember_rejection(self, ids: Iterable[int], reason: str, llm: LLMClient) -> None:
+        fingerprint = cluster_fingerprint(ids)
+        self.store.save_rejection({
+            "fingerprint": fingerprint,
+            "signal_ids": sorted({int(i) for i in ids}),
+            "prompt_version": prompt_v1.PROMPT_VERSION,
+            "reason": reason,
+            "llm_model": llm.model,
+        })
+        self.rejected.add(fingerprint)
 
     def merge(self, card_id: int, ids: Iterable[int]) -> bool:
         """Link ``ids`` to the card and refresh its computed fields. False if nothing new."""
@@ -297,9 +324,8 @@ class Synthesizer:
             "llm_model": llm.model,
             "prompt_version": prompt_v1.PROMPT_VERSION,
         }
-        card_id = self.store.insert_card(row)
         ids = {e.signal.signal_id for e in items}
-        self.store.link_card_signals(card_id, ids)
+        card_id = self.store.insert_card_with_links(row, ids)
         self.links[card_id] = ids
         self.cards[card_id] = vec
         self.card_when[card_id] = card["trigger_when"]
@@ -366,6 +392,9 @@ def run(argv: Sequence[str] | None = None, *,
                 else:
                     stats.unchanged += 1
                 continue
+            if cluster_fingerprint(ids) in synth.rejected:
+                stats.skipped_rejected += 1
+                continue
             if args.dry_run:
                 stats.would_create += 1
                 continue
@@ -378,9 +407,11 @@ def run(argv: Sequence[str] | None = None, *,
             stats.llm_calls += calls
             if card is None:
                 stats.failed_validation += 1
+                synth.remember_rejection(ids, "invalid", llm)
                 continue
             if not card["valid_opportunity"]:
                 stats.rejected += 1
+                synth.remember_rejection(ids, "rejected", llm)
                 continue
             vec = embedder.embed([card_text(card)])[0]
             dup, sim = nearest_card(vec, synth.cards)
@@ -413,6 +444,7 @@ def run(argv: Sequence[str] | None = None, *,
         f"signals={len(items)} clusters={stats.clusters} qualifying={stats.qualifying} "
         f"created={stats.created} merged={stats.merged} unchanged={stats.unchanged} "
         f"rejected={stats.rejected} failed={stats.failed_validation} "
+        f"skipped_rejected={stats.skipped_rejected} "
         f"deferred={stats.deferred} would_create={stats.would_create} "
         f"llm_calls={stats.llm_calls} errors={stats.errors}"
         + (f" card_ids={','.join(map(str, stats.card_ids))}" if stats.card_ids else ""),

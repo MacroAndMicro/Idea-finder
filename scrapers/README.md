@@ -179,4 +179,11 @@ per run (free-tier quotas) and the rest wait for the next run. `--dry-run` = no 
   card is that card — new signals are linked and counts/confidence/frequency refreshed,
   with no LLM call. A new card whose text embedding has cosine >= **0.90**
   (`CARD_DUPLICATE_THRESHOLD`) with an existing card is merged into it instead.
+- Rejections are remembered (IF-48): a cluster answered `valid_opportunity: false` or with
+  invalid output is stored in `synthesis_rejections` by fingerprint
+  (`sha256(prompt_version + sorted signal ids)`) and skipped with no LLM call
+  (`skipped_rejected=` in the summary) until its signal set or the prompt version changes.
+- A new card and its `card_signals` links are written in one transaction through the SQL
+  function `insert_card_with_links(card jsonb, signal_ids bigint[])` (PostgREST RPC,
+  service_role only), so a failed link can never leave a card without evidence.
 - A quota-exhausted provider response stops the run at once.

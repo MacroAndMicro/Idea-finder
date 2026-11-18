@@ -26,6 +26,8 @@ INGESTION_RUNS_TABLE = "ingestion_runs"
 SIGNAL_EXTRACTIONS_TABLE = "signal_extractions"
 CARDS_TABLE = "opportunity_cards"
 CARD_SIGNALS_TABLE = "card_signals"
+SYNTHESIS_REJECTIONS_TABLE = "synthesis_rejections"
+INSERT_CARD_RPC = "insert_card_with_links"
 CONFLICT_COLUMNS = "source_platform,external_id"
 BATCH_SIZE = 200  # rows per POST; keeps payloads well under PostgREST limits
 READ_PAGE_SIZE = 1000  # Supabase's default max-rows; never ask for more per request
@@ -214,6 +216,27 @@ class SupabaseStore:
             "is_b2b_filtered": "is.true",
             "order": "id.asc",
         })
+
+    def fetch_rejection_fingerprints(self) -> set[str]:
+        """Fingerprints of clusters synthesis already rejected (IF-48)."""
+        rows = self.select_all(SYNTHESIS_REJECTIONS_TABLE,
+                               {"select": "fingerprint", "order": "fingerprint.asc"})
+        return {str(r["fingerprint"]) for r in rows if r.get("fingerprint")}
+
+    def save_rejection(self, row: Mapping[str, Any]) -> None:
+        self._post(SYNTHESIS_REJECTIONS_TABLE, [dict(row)],
+                   "resolution=merge-duplicates,return=minimal", "?on_conflict=fingerprint")
+
+    def insert_card_with_links(self, row: Mapping[str, Any], signal_ids: Iterable[int]) -> int:
+        """Insert one card and its card_signals links in one transaction (SQL function
+        ``public.insert_card_with_links``, IF-48): never a card without its evidence."""
+        payload = {"card": dict(row), "signal_ids": sorted({int(s) for s in signal_ids})}
+        resp = self.client.post_json(f"{self._base}/rpc/{INSERT_CARD_RPC}", payload,
+                                     self._headers)
+        card_id = resp.json() if resp.body else None
+        if isinstance(card_id, bool) or not isinstance(card_id, int):
+            raise HttpError(0, f"{self._base}/rpc/{INSERT_CARD_RPC}", "insert returned no id")
+        return card_id
 
     def insert_card(self, row: Mapping[str, Any]) -> int:
         returned = self._post(CARDS_TABLE, [dict(row)], "return=representation",
