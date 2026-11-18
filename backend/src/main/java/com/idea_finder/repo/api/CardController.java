@@ -32,8 +32,9 @@ public class CardController {
 			@RequestParam(required = false) BigDecimal minConfidence,
 			@RequestParam(required = false) String intent,
 			@RequestParam(required = false) String sort,
-			@RequestParam(required = false) String b2b) {
-		return cards.list(page, size, q, source, minConfidence, intent, sort, b2b);
+			@RequestParam(required = false) String b2b,
+			@RequestParam(required = false) String createdSince) {
+		return cards.list(page, size, q, source, minConfidence, intent, sort, b2b, createdSince);
 	}
 
 	/** IF-53: counts per filter option for the card list's filter chips (same filters as list). */
@@ -43,9 +44,10 @@ public class CardController {
 			@RequestParam(required = false) String source,
 			@RequestParam(required = false) BigDecimal minConfidence,
 			@RequestParam(required = false) String intent,
-			@RequestParam(required = false) String b2b) {
+			@RequestParam(required = false) String b2b,
+			@RequestParam(required = false) String createdSince) {
 		// IF-68: cacheable like /api/stats; card list, detail, signals and similar stay uncached.
-		return caching.ok(cards.facets(q, source, minConfidence, intent, b2b));
+		return caching.ok(cards.facets(q, source, minConfidence, intent, b2b, createdSince));
 	}
 
 	@GetMapping("/{id}")

@@ -73,6 +73,7 @@ A page past the end returns `200` with `items: []`.
 | `intent` | `High`, `Medium`, `Low`, `Unspecified` | Case-insensitive, trimmed |
 | `minConfidence` | decimal 0–100 | Inclusive; cards with no score are excluded when set |
 | `b2b` | `true`, `false` | Case-insensitive; anything else (`yes`, `1`) is 400 |
+| `createdSince` | ISO-8601 date (`2026-11-16` = 00:00 UTC that day) or instant with offset (`2026-11-16T08:00:00Z`, `…+01:00`) | Keeps cards with `created_at` >= the value (inclusive). A future value is valid and returns nothing; a time without offset, epoch numbers or years outside 1–9999 are 400 |
 | `q` | 2–100 characters (after trim) | Case-insensitive literal substring of `title`, `problem_statement` or `duct_tape_solutions`; `%` and `_` match literally |
 
 ---
@@ -149,6 +150,7 @@ Opportunity Cards, paged.
 | `minConfidence` | decimal | — | 0–100 |
 | `intent` | string | — | see Shared filter values |
 | `b2b` | string | — | `true` / `false` (filters on `is_b2b_filtered`) |
+| `createdSince` | string | — | see Shared filter values ("new this week": `createdSince=2026-11-16`) |
 | `sort` | string | `confidence` | `confidence` (highest score first, unscored last, then newest), `newest` (`created_at` desc), `recent` (`last_seen_at` desc, cards without it last) |
 
 400 on any invalid value above (the `parameter` key names it).
@@ -184,11 +186,12 @@ Each item is a **Card** object:
 
 Card counts per filter option, for the card list's filter chips. Cacheable (see Conventions).
 
-Params: `q`, `source`, `minConfidence`, `intent`, `b2b` — same values and the same 400s as
+Params: `q`, `source`, `minConfidence`, `intent`, `b2b`, `createdSince` — same values and the same 400s as
 [`GET /api/cards`](#get-apicards) (no paging or sort).
 
 - `total` = cards matching **every** filter (equals `/api/cards` `total_elements` for the same
   filters).
+- `createdSince` has no map of its own, so it applies to `total` and to every map.
 - Each map applies every filter **except its own**, so a count says how many cards selecting that
   option would return.
 - `source_platform` always has the four Phase 1 sources (0 when empty), plus other sources that

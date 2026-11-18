@@ -35,6 +35,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
 	static final String FORWARDED_FOR = "X-Forwarded-For";
 
+	/** IF-78: the resolved client IP, for {@link AccessLogFilter}. */
+	public static final String CLIENT_IP_ATTRIBUTE = RateLimitFilter.class.getName() + ".clientIp";
+
 	private final RateLimiter limiter;
 	private final boolean trustForwardedFor;
 
@@ -54,7 +57,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
 			throws ServletException, IOException {
-		RateLimiter.Decision decision = limiter.tryAcquire(clientIp(request));
+		String clientIp = clientIp(request);
+		request.setAttribute(CLIENT_IP_ATTRIBUTE, clientIp);
+		RateLimiter.Decision decision = limiter.tryAcquire(clientIp);
 		if (decision.allowed()) {
 			chain.doFilter(request, response);
 			return;

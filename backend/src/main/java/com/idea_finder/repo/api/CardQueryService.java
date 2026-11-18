@@ -1,6 +1,11 @@
 package com.idea_finder.repo.api;
 
 import java.math.BigDecimal;
+import java.time.DateTimeException;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -54,12 +59,18 @@ public class CardQueryService {
 
 	public PageResponse<CardResponse> list(Integer page, Integer size, String q, String source,
 			BigDecimal minConfidence, String intent, String sort, String b2b) {
+		return list(page, size, q, source, minConfidence, intent, sort, b2b, null);
+	}
+
+	/** IF-77: plus the optional {@code createdSince} filter (see {@link #parseCreatedSince}). */
+	public PageResponse<CardResponse> list(Integer page, Integer size, String q, String source,
+			BigDecimal minConfidence, String intent, String sort, String b2b, String createdSince) {
 		String keyword = parseQuery(q);
 		checkMinConfidence(minConfidence);
 		PageRequest pageable = pageRequest(page, size, parseSort(sort));
 		return PageResponse.of(
 			repository.search(keyword, parseSource(source), minConfidence, parseIntent(intent), parseB2b(b2b),
-				pageable),
+				parseCreatedSince(createdSince), pageable),
 			CardResponse::from);
 	}
 
@@ -70,19 +81,27 @@ public class CardQueryService {
 	 * null (unknown intent / B2B flag) are counted in {@code total} but in no bucket.
 	 */
 	public FacetsResponse facets(String q, String source, BigDecimal minConfidence, String intent, String b2b) {
+		return facets(q, source, minConfidence, intent, b2b, null);
+	}
+
+	/** IF-77: plus {@code createdSince}, which applies to the total and to every facet (it has no facet of its own). */
+	public FacetsResponse facets(String q, String source, BigDecimal minConfidence, String intent, String b2b,
+			String createdSince) {
 		String keyword = parseQuery(q);
 		SourcePlatform platform = parseSource(source);
 		checkMinConfidence(minConfidence);
 		EconomicIntent economicIntent = parseIntent(intent);
 		Boolean b2bFlag = parseB2b(b2b);
+		OffsetDateTime since = parseCreatedSince(createdSince);
 		return FacetsResponse.of(
-			repository.count(OpportunityCardRepository.filters(keyword, platform, minConfidence, economicIntent, b2bFlag)),
+			repository.count(OpportunityCardRepository.filters(keyword, platform, minConfidence, economicIntent, b2bFlag,
+				since)),
 			repository.countGroupedBy("sourcePlatform",
-				OpportunityCardRepository.filters(keyword, null, minConfidence, economicIntent, b2bFlag)),
+				OpportunityCardRepository.filters(keyword, null, minConfidence, economicIntent, b2bFlag, since)),
 			repository.countGroupedBy("economicIntent",
-				OpportunityCardRepository.filters(keyword, platform, minConfidence, null, b2bFlag)),
+				OpportunityCardRepository.filters(keyword, platform, minConfidence, null, b2bFlag, since)),
 			repository.countGroupedBy("b2bFiltered",
-				OpportunityCardRepository.filters(keyword, platform, minConfidence, economicIntent, null)));
+				OpportunityCardRepository.filters(keyword, platform, minConfidence, economicIntent, null, since)));
 	}
 
 	public CardResponse get(long id) {
@@ -189,6 +208,38 @@ public class CardQueryService {
 			case "false" -> Boolean.FALSE;
 			default -> throw new InvalidParameterException("b2b", "b2b must be true or false");
 		};
+	}
+
+	/** Longest accepted createdSince value; real ISO-8601 instants are well under this. */
+	static final int MAX_CREATED_SINCE = 40;
+
+	/**
+	 * IF-77: {@code createdSince} as an ISO-8601 date ({@code 2026-11-16} = start of that day, UTC) or
+	 * an instant with an offset ({@code 2026-11-16T08:00:00Z}, {@code 2026-11-16T08:00:00+01:00}).
+	 * Absent/blank = no filter. Years outside 1-9999 are rejected (outside what clients need and safe
+	 * for timestamptz). A future value is valid and simply matches nothing.
+	 */
+	static OffsetDateTime parseCreatedSince(String createdSince) {
+		if (isBlank(createdSince)) {
+			return null;
+		}
+		String value = createdSince.trim();
+		OffsetDateTime parsed = null;
+		if (value.length() <= MAX_CREATED_SINCE) {
+			try {
+				parsed = value.indexOf('T') < 0 && value.indexOf('t') < 0
+					? LocalDate.parse(value, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay().atOffset(ZoneOffset.UTC)
+					: OffsetDateTime.parse(value, DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+			}
+			catch (DateTimeException ex) {
+				parsed = null;
+			}
+		}
+		if (parsed == null || parsed.getYear() < 1 || parsed.getYear() > 9999) {
+			throw new InvalidParameterException("createdSince",
+				"createdSince must be an ISO-8601 date (2026-11-16) or instant with offset (2026-11-16T08:00:00Z)");
+		}
+		return parsed;
 	}
 
 	static SourcePlatform parseSource(String source) {

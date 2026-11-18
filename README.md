@@ -60,6 +60,33 @@ overridden with environment variables:
 | `API_AGGREGATE_CACHE_MAX_AGE` | `60s` | `Cache-Control: public, max-age` on `/api/stats` and `/api/cards/facets` (`0` = no header) |
 | `HEALTH_DB_TIMEOUT_SECONDS` | `2` | Query timeout of the `select 1` behind `GET /api/health` (200 `db:up` / 503 `db:down`) |
 
+Every `/api/**` request writes one access-log line after it completes, e.g.
+`access method=GET path=/api/cards status=200 duration_ms=12 request_id=… client_ip=…` (INFO;
+`/api/health` at DEBUG). Headers, bodies and query values are never logged; `client_ip` honours
+`API_TRUST_FORWARDED_FOR`.
+
+## Docker (backend)
+
+`backend/Dockerfile` builds a production image of the API: a JDK 21 stage runs
+`./mvnw -DskipTests package` (tests run in CI), and a JRE 21 stage runs it as a non-root user
+(uid 10001) on port 8080, with a `HEALTHCHECK` on `GET /api/health`. No configuration or secret
+is baked in; `.env` files are excluded from the build context.
+
+```bash
+cd backend
+docker build -t idea-finder-api .
+docker run --rm -p 8080:8080 \
+  -e DATABASE_URL -e DATABASE_USER -e DATABASE_PASSWORD \
+  -e FRONTEND_ORIGIN=https://app.example.com \
+  idea-finder-api
+curl -i http://localhost:8080/api/health
+```
+
+Pass any variable from the table above with `-e` (or `--env-file`, kept outside the repo).
+`SERVER_PORT` changes the port (the health check follows it); `JAVA_TOOL_OPTIONS` defaults to
+`-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError` and can be overridden. Behind a reverse
+proxy that sets `X-Forwarded-For`, also pass `API_TRUST_FORWARDED_FOR=true`.
+
 ## Workflow
 
 - Tickets live on the Supabase `project_board` table (keys like `IF-42`).
