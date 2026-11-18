@@ -33,6 +33,17 @@ public class CardController {
 		return cards.list(page, size, q, source, minConfidence, intent, sort, b2b);
 	}
 
+	/** IF-53: counts per filter option for the card list's filter chips (same filters as list). */
+	@GetMapping("/facets")
+	public FacetsResponse facets(
+			@RequestParam(required = false) String q,
+			@RequestParam(required = false) String source,
+			@RequestParam(required = false) BigDecimal minConfidence,
+			@RequestParam(required = false) String intent,
+			@RequestParam(required = false) String b2b) {
+		return cards.facets(q, source, minConfidence, intent, b2b);
+	}
+
 	@GetMapping("/{id}")
 	public CardResponse get(@PathVariable long id) {
 		return cards.get(id);

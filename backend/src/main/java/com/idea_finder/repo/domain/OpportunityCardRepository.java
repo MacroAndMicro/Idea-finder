@@ -18,7 +18,7 @@ import jakarta.persistence.criteria.Predicate;
 
 /** Read-only repository: no save/delete methods are exposed. */
 public interface OpportunityCardRepository
-		extends Repository<OpportunityCard, Long>, JpaSpecificationExecutor<OpportunityCard> {
+		extends Repository<OpportunityCard, Long>, JpaSpecificationExecutor<OpportunityCard>, CardFacetCounts {
 
 	java.util.Optional<OpportunityCard> findById(Long id);
 
