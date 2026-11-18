@@ -1,4 +1,4 @@
-import type { OpportunityCard, PageResponse, Signal, Stats } from "./types";
+import type { Facets, OpportunityCard, PageResponse, Signal, Stats } from "./types";
 
 const BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080").replace(/\/$/, "");
 
@@ -106,4 +106,10 @@ export function fetchSignals(id: string, page: number, signal?: AbortSignal): Pr
 
 export function fetchStats(signal?: AbortSignal): Promise<Stats> {
   return getJson("/api/stats", signal);
+}
+
+/** Per-option counts for the current filters (same params as the list, no paging or sort). */
+export function fetchFacets(q: CardQuery, signal?: AbortSignal): Promise<Facets> {
+  const qs = filterParams(q).toString();
+  return getJson(qs ? `/api/cards/facets?${qs}` : "/api/cards/facets", signal);
 }

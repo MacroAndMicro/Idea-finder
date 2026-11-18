@@ -2,13 +2,19 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { errorMessage, fetchCards, queryFromParams, queryToParams, type CardQuery } from "@/lib/api";
-import type { OpportunityCard, PageResponse } from "@/lib/types";
+import { errorMessage, fetchCards, fetchFacets, queryFromParams, queryToParams, type CardQuery } from "@/lib/api";
+import type { Facets, OpportunityCard, PageResponse } from "@/lib/types";
 import OpportunityCardView from "./OpportunityCardView";
 import SearchBox from "./SearchBox";
 
+// min-w keeps selects from changing width when facet counts arrive.
 const selectCls =
-  "min-h-11 rounded border border-border bg-surface px-2 text-sm text-foreground";
+  "min-h-11 min-w-44 rounded border border-border bg-surface px-2 text-sm text-foreground tabular-nums";
+
+/** "Reddit (9)" once facets are in; just "Reddit" while loading or if facets failed. */
+function withCount(label: string, n: number | undefined): string {
+  return n === undefined ? label : `${label} (${n})`;
+}
 
 type State =
   | { kind: "loading" }
@@ -45,6 +51,26 @@ export default function CardList() {
     return () => ctrl.abort();
   }, [query, key]);
 
+  // Facets: counts per filter option. Keyed by the filters (not page/sort) so
+  // paging doesn't refetch; on error counts are simply left out.
+  const facetQuery = useMemo(
+    () => ({ q: query.q, source: query.source, intent: query.intent, minConfidence: query.minConfidence, b2b: query.b2b }),
+    [query.q, query.source, query.intent, query.minConfidence, query.b2b],
+  );
+  // The previous counts stay visible while new ones load, so labels don't flicker.
+  const [facets, setFacets] = useState<Facets | null>(null);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetchFacets(facetQuery, ctrl.signal)
+      .then(setFacets)
+      .catch((e: Error) => {
+        if (e.name !== "AbortError") setFacets(null);
+      });
+    return () => ctrl.abort();
+  }, [facetQuery]);
+  const src = facets?.source_platform;
+  const intent = facets?.economic_intent;
+
   const set = (patch: Partial<CardQuery>) => setQuery({ ...query, ...patch, page: 0 });
   const onSearch = useCallback((q: string | undefined) => setQuery({ ...query, q, page: 0 }), [query, setQuery]);
 
@@ -56,20 +82,20 @@ export default function CardList() {
           Source
           <select className={selectCls} value={query.source ?? ""} onChange={(e) => set({ source: e.target.value })}>
             <option value="">All sources</option>
-            <option value="reddit">Reddit</option>
-            <option value="github">GitHub</option>
-            <option value="hackernews">Hacker News</option>
-            <option value="stackexchange">Stack Exchange</option>
+            <option value="reddit">{withCount("Reddit", src?.reddit)}</option>
+            <option value="github">{withCount("GitHub", src?.github)}</option>
+            <option value="hackernews">{withCount("Hacker News", src?.hackernews)}</option>
+            <option value="stackexchange">{withCount("Stack Exchange", src?.stackexchange)}</option>
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium">
           Economic intent
           <select className={selectCls} value={query.intent ?? ""} onChange={(e) => set({ intent: e.target.value })}>
             <option value="">Any</option>
-            <option>High</option>
-            <option>Medium</option>
-            <option>Low</option>
-            <option>Unspecified</option>
+            <option value="High">{withCount("High", intent?.High)}</option>
+            <option value="Medium">{withCount("Medium", intent?.Medium)}</option>
+            <option value="Low">{withCount("Low", intent?.Low)}</option>
+            <option value="Unspecified">{withCount("Unspecified", intent?.Unspecified)}</option>
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium">
@@ -97,6 +123,9 @@ export default function CardList() {
             onChange={(e) => set({ b2b: e.target.checked })}
           />
           B2B only
+          <span className="min-w-[4ch] tabular-nums text-muted">
+            {facets?.is_b2b_filtered.true !== undefined ? `(${facets.is_b2b_filtered.true})` : ""}
+          </span>
         </label>
       </form>
 

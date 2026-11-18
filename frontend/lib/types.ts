@@ -69,3 +69,11 @@ export interface Stats {
   total_signals: number;
   signals_by_source: Partial<Record<SourcePlatform, number>>;
 }
+
+/** Mirrors the backend FacetsResponse (GET /api/cards/facets). Each map ignores its own filter. */
+export interface Facets {
+  total: number;
+  source_platform: Partial<Record<SourcePlatform, number>>;
+  economic_intent: Partial<Record<EconomicIntent, number>>;
+  is_b2b_filtered: { true?: number; false?: number };
+}
