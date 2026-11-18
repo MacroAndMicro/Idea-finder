@@ -55,15 +55,34 @@ public class CardQueryService {
 	public PageResponse<CardResponse> list(Integer page, Integer size, String q, String source,
 			BigDecimal minConfidence, String intent, String sort, String b2b) {
 		String keyword = parseQuery(q);
-		if (minConfidence != null
-				&& (minConfidence.compareTo(BigDecimal.ZERO) < 0 || minConfidence.compareTo(BigDecimal.valueOf(100)) > 0)) {
-			throw new InvalidParameterException("minConfidence", "minConfidence must be between 0 and 100");
-		}
+		checkMinConfidence(minConfidence);
 		PageRequest pageable = pageRequest(page, size, parseSort(sort));
 		return PageResponse.of(
 			repository.search(keyword, parseSource(source), minConfidence, parseIntent(intent), parseB2b(b2b),
 				pageable),
 			CardResponse::from);
+	}
+
+	/**
+	 * IF-53: card counts per source_platform, economic_intent and is_b2b_filtered for the filter
+	 * chips. Takes the same filters as {@link #list}; each facet applies every filter except its own,
+	 * so the counts say how many cards selecting that option would return. Cards whose value is
+	 * null (unknown intent / B2B flag) are counted in {@code total} but in no bucket.
+	 */
+	public FacetsResponse facets(String q, String source, BigDecimal minConfidence, String intent, String b2b) {
+		String keyword = parseQuery(q);
+		SourcePlatform platform = parseSource(source);
+		checkMinConfidence(minConfidence);
+		EconomicIntent economicIntent = parseIntent(intent);
+		Boolean b2bFlag = parseB2b(b2b);
+		return FacetsResponse.of(
+			repository.count(OpportunityCardRepository.filters(keyword, platform, minConfidence, economicIntent, b2bFlag)),
+			repository.countGroupedBy("sourcePlatform",
+				OpportunityCardRepository.filters(keyword, null, minConfidence, economicIntent, b2bFlag)),
+			repository.countGroupedBy("economicIntent",
+				OpportunityCardRepository.filters(keyword, platform, minConfidence, null, b2bFlag)),
+			repository.countGroupedBy("b2bFiltered",
+				OpportunityCardRepository.filters(keyword, platform, minConfidence, economicIntent, null)));
 	}
 
 	public CardResponse get(long id) {
@@ -151,6 +170,13 @@ public class CardQueryService {
 			case "recent" -> Sort.by(Sort.Order.desc("lastSeenAt").nullsLast(), Sort.Order.desc("id"));
 			default -> throw new InvalidParameterException("sort", "sort must be one of: confidence, newest, recent");
 		};
+	}
+
+	static void checkMinConfidence(BigDecimal minConfidence) {
+		if (minConfidence != null
+				&& (minConfidence.compareTo(BigDecimal.ZERO) < 0 || minConfidence.compareTo(BigDecimal.valueOf(100)) > 0)) {
+			throw new InvalidParameterException("minConfidence", "minConfidence must be between 0 and 100");
+		}
 	}
 
 	/** IF-37: strict true/false (case-insensitive); absent/blank = no filter. */
