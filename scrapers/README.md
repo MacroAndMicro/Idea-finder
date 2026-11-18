@@ -157,6 +157,26 @@ most similar existing cluster centroid if similarity >= `SIMILARITY_THRESHOLD` (
 overridable per call), else starts a new cluster; ties go to the older cluster.
 Vectors must be 1536-d.
 
+### Threshold calibration (IF-63)
+
+```
+python -m scrapers.cluster --report [--min-signals 2]
+```
+
+Read-only: prints the pairwise similarity histogram of the embedded B2B pain signals and
+cluster count / sizes / qualifying clusters at thresholds 0.70–0.90 (step 0.02).
+
+Findings, 2026-11-18 (`gemini/gemini-embedding-2`, 6 embedded B2B pain signals, 15 pairs):
+similarity min 0.539 · median 0.629 · max 0.716. At every threshold 0.72–0.90 all 6 are
+singletons; at 0.70 one 3-signal cluster forms around the 0.716 pair. On reading them, the
+6 signals are 6 different problems (the 0.716 pair is two different complaints about one
+agent tool), so the singletons come from unrelated signals, not from a strict threshold.
+For this model unrelated-but-same-domain posts already score 0.54–0.72, so the threshold
+must stay clearly above ~0.72. **`SIMILARITY_THRESHOLD` stays 0.82**; re-run the report
+once there are real same-pain pairs to check the upper side.
+`tests/test_cluster_threshold.py` checks the mechanics on a synthetic labelled fixture
+(`tests/fixtures/cluster/labelled_pairs.json`, 10 same-pain + 10 different-pain pairs).
+
 Confidence score (rounded, clamped to 1–100; weights sum to 100):
 
 | Factor | Weight | Formula |

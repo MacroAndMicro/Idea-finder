@@ -1,0 +1,27 @@
+{
+  "_comment": "IF-63: clearly synthetic signal-text pairs (written for this test, not real posts). same = one pain reworded; different = adjacent pains in the same domain.",
+  "same": [
+    ["Every Monday we merge Stripe CSV exports into the finance spreadsheet by hand", "We merge the Stripe CSV exports into our finance spreadsheet by hand every Monday"],
+    ["Terraform launch template keeps every old version so AMIs can never be deregistered", "Old launch template version history in Terraform means AMIs can never be deregistered"],
+    ["Jira tickets do not sync status back to GitHub pull requests so engineers update both manually", "Engineers manually update both because GitHub pull request status does not sync back to Jira tickets"],
+    ["Salesforce report export times out for large accounts so sales ops splits the export manually", "Sales ops manually splits the Salesforce report export because it times out for large accounts"],
+    ["Kubernetes cron jobs fail silently and nobody gets alerted until customers complain", "Nobody gets alerted when Kubernetes cron jobs fail silently until customers complain"],
+    ["Our team copies invoice line items from emails into QuickBooks by hand each month", "Each month our team copies invoice line items by hand from emails into QuickBooks"],
+    ["Postgres migrations lock large tables in production and cause downtime during deploys", "During deploys Postgres migrations lock large production tables and cause downtime"],
+    ["Slack alerts from Datadog are too noisy so the on-call engineer mutes the channel", "The on-call engineer mutes the channel because Datadog alerts in Slack are too noisy"],
+    ["HubSpot contacts get duplicated after every webinar import and marketing dedupes them in spreadsheets", "Marketing dedupes HubSpot contacts in spreadsheets because every webinar import duplicates them"],
+    ["Rotating AWS access keys across dozens of CI pipelines is a manual weekly chore", "A manual weekly chore: rotating AWS access keys across dozens of CI pipelines"]
+  ],
+  "different": [
+    ["Every Monday we merge Stripe CSV exports into the finance spreadsheet by hand", "Stripe webhooks arrive out of order and break our subscription state machine"],
+    ["Terraform launch template keeps every old version so AMIs can never be deregistered", "Terraform plan takes twenty minutes on our monorepo state file"],
+    ["Jira tickets do not sync status back to GitHub pull requests so engineers update both manually", "GitHub Actions runners run out of disk space during Docker builds"],
+    ["Salesforce report export times out for large accounts so sales ops splits the export manually", "Salesforce permission sets are impossible to audit across sandboxes"],
+    ["Kubernetes cron jobs fail silently and nobody gets alerted until customers complain", "Kubernetes pods get OOM killed because memory limits are guessed"],
+    ["Our team copies invoice line items from emails into QuickBooks by hand each month", "QuickBooks bank feed disconnects weekly and must be reauthorized"],
+    ["Postgres migrations lock large tables in production and cause downtime during deploys", "Postgres connection pool exhaustion under bursty serverless traffic"],
+    ["Slack alerts from Datadog are too noisy so the on-call engineer mutes the channel", "Datadog bill doubles because custom metrics cardinality explodes"],
+    ["HubSpot contacts get duplicated after every webinar import and marketing dedupes them in spreadsheets", "HubSpot email sequences cannot branch on product usage data"],
+    ["Rotating AWS access keys across dozens of CI pipelines is a manual weekly chore", "AWS cost explorer cannot attribute shared RDS spend to teams"]
+  ]
+}
