@@ -60,4 +60,16 @@ class StatsEmptyTest {
 			.andExpect(jsonPath("$.last_runs.hackernews.last_run_at").doesNotExist())
 			.andExpect(jsonPath("$.last_runs.stackexchange.last_run_status").doesNotExist());
 	}
+
+	/** IF-45: the pipeline funnel is all zeros on an empty database. */
+	@Test
+	void pipelineAllZero() throws Exception {
+		mvc.perform(get("/api/stats"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.pipeline.embedded_signals").value(0))
+			.andExpect(jsonPath("$.pipeline.extracted_signals").value(0))
+			.andExpect(jsonPath("$.pipeline.pain_points").value(0))
+			.andExpect(jsonPath("$.pipeline.b2b_pain_points").value(0))
+			.andExpect(jsonPath("$.pipeline.failed_extractions").value(0));
+	}
 }

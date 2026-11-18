@@ -23,6 +23,21 @@ public interface RawSignalRepository extends Repository<RawSignal, Long> {
 	@Query("select max(s.fetchedAt) from RawSignal s")
 	OffsetDateTime lastFetchedAt();
 
+	/**
+	 * IF-45: pipeline funnel in one round trip (one scan of raw_signals, one of signal_extractions).
+	 * An extraction whose is_pain_point is null is a failed extraction.
+	 */
+	@Query(nativeQuery = true, value = """
+		select
+		  (select count(*) from {h-schema}raw_signals s where s.embedding is not null) as embeddedSignals,
+		  count(e.id)                                                  as extractedSignals,
+		  count(*) filter (where e.is_pain_point)                      as painPoints,
+		  count(*) filter (where e.is_pain_point and e.is_b2b)         as b2bPainPoints,
+		  count(e.id) filter (where e.is_pain_point is null)           as failedExtractions
+		from {h-schema}signal_extractions e
+		""")
+	PipelineCounts pipelineCounts();
+
 	/** Signals linked to a card through card_signals; ordering comes from the pageable's sort. */
 	@Query("""
 		select s from RawSignal s
