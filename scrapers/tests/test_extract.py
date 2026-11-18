@@ -201,3 +201,15 @@ def test_store_extraction_requests(make_client):
     assert patch.method == "PATCH" and patch.url.endswith("/raw_signals?id=eq.7")
     assert json.loads(patch.body) == {"processed_at": NOW.isoformat()}
     assert patch.headers["apikey"] == SECRET
+
+
+def test_runner_stops_at_once_on_quota_exhausted():
+    from scrapers.http_client import QuotaExhausted
+
+    sigs = [dict(GOLDEN[0]["signal"], id=i) for i in range(1, 6)]
+    store = StubStore(sigs)
+    err = QuotaExhausted(429, "https://llm.example.test/x?key=SECRETKEY", "wait 17399s")
+    llm = SeqLLM([err, "never asked"])
+    code, out = run_cli([], llm, store)
+    assert code == 1 and len(llm.calls) == 1 and store.processed == []
+    assert "quota exhausted" in out and "SECRETKEY" not in out

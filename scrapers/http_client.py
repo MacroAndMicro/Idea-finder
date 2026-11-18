@@ -69,10 +69,20 @@ class HttpError(RuntimeError):
 
 
 class RateLimitExceeded(HttpError):
-    """The API asked us to wait longer than ``max_wait``; caller should stop."""
+    """Retries are exhausted or the API asked for too long a wait; caller should stop."""
+
+
+class QuotaExhausted(RateLimitExceeded):
+    """The API asked us to wait longer than ``max_wait`` (e.g. a per-day quota).
+
+    Raised on the first such response, without retrying: every retry would be
+    rejected too, and on metered quotas it can count against the next window.
+    """
 
 
 Transport = Callable[[HttpRequest, float], HttpResponse]
+#: Optional provider-specific parser of a throttled response body → seconds to wait.
+RetryHint = Callable[["HttpResponse"], float | None]
 
 
 def urllib_transport(request: HttpRequest, timeout: float) -> HttpResponse:
@@ -103,6 +113,7 @@ class HttpClient:
         max_wait: float = 900.0,
         min_interval: float = 0.0,
         default_headers: Mapping[str, str] | None = None,
+        retry_hint: RetryHint | None = None,
     ) -> None:
         self._transport = transport
         self._sleep = sleep
@@ -116,6 +127,7 @@ class HttpClient:
         self._headers.update(default_headers or {})
         self._last_request: float | None = None
         self._not_before: float = 0.0
+        self._retry_hint = retry_hint
 
     def defer(self, seconds: float) -> None:
         """Ask the client not to send another request for ``seconds`` (e.g. SE `backoff`)."""
@@ -196,11 +208,14 @@ class HttpClient:
                 return resp
             if not throttled:
                 raise HttpError(resp.status, request.url)
+            if server_wait is None and self._retry_hint is not None:
+                server_wait = self._retry_hint(resp)
+            if server_wait is not None and server_wait > self.max_wait:
+                raise QuotaExhausted(resp.status, request.url,
+                                     f"wait {server_wait:.0f}s too long")
             if attempt >= self.max_retries:
                 raise RateLimitExceeded(resp.status, request.url, "retries exhausted")
             delay = server_wait if server_wait is not None else self.backoff_base * 2**attempt
-            if delay > self.max_wait:
-                raise RateLimitExceeded(resp.status, request.url, f"wait {delay:.0f}s too long")
             log.warning("HTTP %s on %s; retry in %.1fs", resp.status, _redact(request.url), delay)
             self._sleep(delay)
             attempt += 1
