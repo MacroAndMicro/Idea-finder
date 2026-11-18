@@ -16,6 +16,7 @@ scrapers/
   embed.py           CLI: python -m scrapers.embed — 1536-d embeddings on raw_signals
   extract.py         CLI: python -m scrapers.extract — per-signal LLM extraction → signal_extractions
   synthesize.py      CLI: python -m scrapers.synthesize — clusters → opportunity_cards + card_signals
+  pipeline.py        CLI: python -m scrapers.pipeline — ingest → extract → embed → synthesize
   llm/               provider-agnostic LLMClient / EmbeddingClient: base, factory, fake, gemini
   llm/prompts/       versioned prompts (extract_signal_v1, synthesize_card_v1); never edited after shipping
   llm/extraction_schema.py  strict JSON validation of extraction output
@@ -30,6 +31,21 @@ Env vars: `GITHUB_TOKEN`, `STACKEXCHANGE_KEY`, `SCRAPER_USER_AGENT` (optional),
 `LLM_PROVIDER`/`LLM_MODEL`/`LLM_API_KEY`, `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/
 `EMBEDDING_API_KEY`/`EMBEDDING_DIMENSIONS` (must be 1536). Adding a source = one new
 `SourceAdapter` subclass; G2/Capterra are Phase 2 and intentionally absent.
+
+## Daily run (one command)
+
+```
+python -m scrapers.pipeline [--sources hackernews,github,stackexchange,reddit]
+    [--extract-limit 18] [--synthesize-limit 2] [--skip-synthesize] [--dry-run]
+```
+
+Runs `ingest` per source, then `extract` (capped), `embed`, `synthesize` (capped), reusing
+each module's `run()`. Defaults fit the Gemini free tier (20 generate requests/day):
+18 extractions + 2 card writes. Embed runs after extract because it embeds only signals
+already classified as B2B pain. Sources with missing secrets (e.g. `REDDIT_*`) are skipped
+with a note; a failing source or stage is reported and the rest still run. Prints one
+`stage=… status=…` line per stage plus a `pipeline status=…` total; exit 0 only if no
+stage failed. `--dry-run` = ingest/embed/synthesize dry-runs, extract skipped.
 
 ## Ingest
 
