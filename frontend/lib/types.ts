@@ -49,3 +49,15 @@ export const SOURCE_LABELS: Record<SourcePlatform, string> = {
   capterra: "Capterra",
   other: "Other",
 };
+
+/** Mirrors the backend SignalResponse (GET /api/cards/{id}/signals): one piece of evidence. */
+export interface Signal {
+  id: number;
+  source_platform: SourcePlatform;
+  url: string | null;
+  title: string | null;
+  body_snippet: string | null;
+  score: number | null;
+  comment_count: number | null;
+  source_created_at: string | null;
+}

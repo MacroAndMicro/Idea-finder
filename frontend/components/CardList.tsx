@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { fetchCards, queryFromParams, queryToParams, type CardQuery } from "@/lib/api";
+import { errorMessage, fetchCards, queryFromParams, queryToParams, type CardQuery } from "@/lib/api";
 import type { OpportunityCard, PageResponse } from "@/lib/types";
 import OpportunityCardView from "./OpportunityCardView";
 
@@ -35,8 +35,7 @@ export default function CardList() {
       .then((data) => setResult({ key, state: { kind: "ok", data } }))
       .catch((e: Error) => {
         if (e.name !== "AbortError") {
-          const message = e instanceof TypeError ? "Could not reach the API. Check that the backend is running." : e.message;
-          setResult({ key, state: { kind: "error", message } });
+          setResult({ key, state: { kind: "error", message: errorMessage(e) } });
         }
       });
     return () => ctrl.abort();

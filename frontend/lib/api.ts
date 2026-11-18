@@ -1,4 +1,4 @@
-import type { OpportunityCard, PageResponse } from "./types";
+import type { OpportunityCard, PageResponse, Signal } from "./types";
 
 const BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080").replace(/\/$/, "");
 
@@ -51,7 +51,34 @@ export async function fetchCards(
   if (q.b2b) params.set("b2b", "true");
   params.set("page", String(q.page ?? 0));
   params.set("size", "12");
-  const res = await fetch(`${BASE}/api/cards?${params}`, { signal });
-  if (!res.ok) throw new Error(`The API responded with status ${res.status}.`);
+  return getJson(`/api/cards?${params}`, signal);
+}
+
+/** Error carrying the HTTP status, so callers can tell "not found" from other failures. */
+export class ApiError extends Error {
+  constructor(public status: number) {
+    super(`The API responded with status ${status}.`);
+    this.name = "ApiError";
+  }
+}
+
+async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { signal });
+  if (!res.ok) throw new ApiError(res.status);
   return res.json();
+}
+
+/** Human-readable message for a failed request (network vs. API error). */
+export function errorMessage(e: Error): string {
+  return e instanceof TypeError ? "Could not reach the API. Check that the backend is running." : e.message;
+}
+
+export function fetchCard(id: string, signal?: AbortSignal): Promise<OpportunityCard> {
+  return getJson(`/api/cards/${encodeURIComponent(id)}`, signal);
+}
+
+export const SIGNALS_PAGE_SIZE = 10;
+
+export function fetchSignals(id: string, page: number, signal?: AbortSignal): Promise<PageResponse<Signal>> {
+  return getJson(`/api/cards/${encodeURIComponent(id)}/signals?page=${page}&size=${SIGNALS_PAGE_SIZE}`, signal);
 }
