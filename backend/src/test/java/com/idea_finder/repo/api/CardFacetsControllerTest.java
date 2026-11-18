@@ -1,6 +1,7 @@
 package com.idea_finder.repo.api;
 
 import static org.assertj.core.api.Assertions.assertThatException;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -18,6 +19,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.context.jdbc.SqlConfig;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.idea_finder.repo.TestDb;
@@ -165,5 +168,89 @@ class CardFacetsControllerTest {
 		mvc.perform(get("/api/cards/facets").param("intent", "huge"))
 			.andExpect(jsonPath("$.parameter").value("intent"))
 			.andExpect(jsonPath("$.title").value("Invalid request parameter"));
+	}
+
+	/**
+	 * IF-70: 400 matrix. Each case names the offending parameter; the body is a ProblemDetail and
+	 * never leaks internals (exception class names, SQL, stack traces).
+	 */
+	@ParameterizedTest(name = "{0}={1} -> 400 on {0}")
+	@CsvSource(delimiter = '|', value = {
+		"source        | g2x",
+		"source        | REDDIT_",
+		"source        | g2,github",
+		"intent        | huge",
+		"intent        | 1",
+		"intent        | High,Low",
+		"minConfidence | -1",
+		"minConfidence | 100.01",
+		"minConfidence | 101",
+		"b2b           | yes",
+		"b2b           | 1",
+		"b2b           | truee",
+		"q             | x",
+		"q             | ' a '"
+	})
+	void invalidValueIs400NamingTheParameter(String name, String value) throws Exception {
+		expectCleanProblem(get("/api/cards/facets").param(name, value))
+			.andExpect(jsonPath("$.title").value("Invalid request parameter"))
+			.andExpect(jsonPath("$.parameter").value(name));
+	}
+
+	@Test
+	void overLongQueryIs400() throws Exception {
+		expectCleanProblem(get("/api/cards/facets").param("q", "a".repeat(CardQueryService.MAX_Q + 1)))
+			.andExpect(jsonPath("$.parameter").value("q"));
+	}
+
+	@ParameterizedTest(name = "minConfidence={0} -> 400")
+	@CsvSource({"abc", "NaN", "1e", "50%"})
+	void nonNumericMinConfidenceIs400(String value) throws Exception {
+		expectCleanProblem(get("/api/cards/facets").param("minConfidence", value));
+	}
+
+	@Test
+	void firstInvalidParameterWinsWhenSeveralAreBad() throws Exception {
+		// Validation order in CardQueryService.facets: q, source, minConfidence, intent, b2b.
+		expectCleanProblem(get("/api/cards/facets").param("source", "nope").param("b2b", "maybe"))
+			.andExpect(jsonPath("$.parameter").value("source"));
+	}
+
+	@ParameterizedTest(name = "{0} -> 200")
+	@CsvSource(delimiter = '|', value = {
+		"source=GitHub",
+		"source=stackexchange&intent=medium&b2b=TRUE",
+		"intent=unspecified&b2b=false",
+		"minConfidence=0",
+		"minConfidence=100",
+		"minConfidence=55.5&b2b=true",
+		"q=gh&source=github&minConfidence=10&intent=Low&b2b=true",
+		"q=ab&source="
+	})
+	void validCombinationsAre200(String query) throws Exception {
+		mvc.perform(get("/api/cards/facets?" + query))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.total").isNumber());
+	}
+
+	@Test
+	void blankParametersMeanNoFilter() throws Exception {
+		mvc.perform(get("/api/cards/facets")
+				.param("q", " ").param("source", " ").param("intent", " ").param("b2b", " "))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.total").value(6));
+	}
+
+	private ResultActions expectCleanProblem(
+			MockHttpServletRequestBuilder request) throws Exception {
+		return mvc.perform(request)
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.status").value(400))
+			.andExpect(jsonPath("$", not(hasKey("trace"))))
+			.andExpect(jsonPath("$", not(hasKey("exception"))))
+			.andExpect(content().string(not(containsString("Exception"))))
+			.andExpect(content().string(not(containsString("SQL"))))
+			.andExpect(content().string(not(containsString("at com."))));
 	}
 }
