@@ -27,9 +27,9 @@ export default function OpportunityCardView({ card }: { card: OpportunityCard })
   return (
     <article className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-4" aria-labelledby={id}>
       <header className="flex flex-col gap-2">
-        <h3 id={id} className="text-base font-semibold leading-snug">
+        <h2 id={id} className="text-base font-semibold leading-snug">
           {card.title}
-        </h3>
+        </h2>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="rounded-full bg-neutral-bg px-2 py-1 font-medium">
             {SOURCE_LABELS[card.source_platform] ?? card.source_platform}
