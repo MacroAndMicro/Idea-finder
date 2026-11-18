@@ -117,8 +117,8 @@ class StubStore:
         self.saved: list[dict] = []
         self.processed: list[int] = []
 
-    def fetch_unprocessed_signals(self, limit):
-        return self.signals[:limit]
+    def fetch_unprocessed_pool(self):
+        return list(self.signals)
 
     def save_extraction(self, row):
         self.saved.append(row)
@@ -141,7 +141,7 @@ def test_runner_writes_extractions_and_marks_processed():
     store = StubStore(sigs)
     code, out = run_cli([], llm, store)
     assert code == 0
-    assert store.processed == [101, 102, 103, 104]
+    assert store.processed == [101, 104, 103, 102]  # prioritised, B2B pain first (IF-50)
     row = store.saved[0]
     assert row["signal_id"] == 101 and row["llm_provider"] == "fake"
     assert row["llm_model"] == "m" and row["prompt_version"] == "extract_signal_v1"
@@ -321,3 +321,35 @@ def test_batch_provider_error_leaves_batch_unprocessed():
 def test_batch_args_validated(argv):
     with pytest.raises(SystemExit):
         run_cli(argv, SeqLLM([]), StubStore([]))
+
+
+# ---- prioritisation + skip rule wired into extract (IF-50) ----
+
+def test_extract_ranks_pool_and_skips_tiny_signals():
+    tiny = dict(GOLDEN[0]["signal"], id=1, title="hi", body="  ")
+    weak = dict(GOLDEN[0]["signal"], id=2, title="A question about my setup at home",
+                body="Nothing here really.", tags=[], score=0, comment_count=0)
+    strong = dict(GOLDEN[0]["signal"], id=3, score=120, comment_count=40)
+    store = StubStore([tiny, weak, strong])
+    llm = SeqLLM([json.dumps(valid())])
+    code, out = run_cli(["--limit", "1"], llm, store)
+    assert code == 0 and len(llm.calls) == 1
+    assert '<signal id="3">' not in llm.calls[0][1]  # batch of one → v1 prompt
+    assert store.processed == [1, 3]  # skipped first, then the best-ranked one
+    assert [r["signal_id"] for r in store.saved] == [3]  # no extraction row for a skip
+    assert "unprocessed=2 skipped=1 candidates=1" in out
+
+
+def test_extract_dry_run_does_not_mark_skips():
+    store = StubStore([dict(GOLDEN[0]["signal"], id=1, title="", body=None)])
+    code, out = run_cli(["--dry-run"], SeqLLM([]), store)
+    assert code == 0 and store.processed == [] and "skipped=1 candidates=0" in out
+
+
+def test_store_unprocessed_pool_request(make_client):
+    client, transport = make_client([ok(json.dumps([{"id": 7}]).encode())])
+    store = SupabaseStore("https://proj.supabase.co", SECRET, client)
+    assert store.fetch_unprocessed_pool() == [{"id": 7}]
+    url = transport.requests[0].url
+    assert "processed_at=is.null" in url and "score" in url and "comment_count" in url
+    assert "order=id.asc" in url and "limit=1000" in url

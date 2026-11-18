@@ -11,6 +11,7 @@ scrapers/
                      X-RateLimit-* waits, gzip, honest User-Agent (SCRAPER_USER_AGENT)
   adapters/          SourceAdapter base + hackernews, github, stackexchange, reddit
   store.py           SupabaseStore: idempotent insert into raw_signals (+ ingestion_runs if present)
+  prioritize.py      deterministic ranking + skip rule for which signals extract spends LLM requests on
   cluster.py         pure clustering of pain-point signals + 1–100 confidence score
   ingest.py          CLI: python -m scrapers.ingest --source {hackernews,github,stackexchange}
   embed.py           CLI: python -m scrapers.embed — 1536-d embeddings on raw_signals
@@ -87,7 +88,8 @@ comma-separated): `sysadmin`, `devops`, `SaaS`, `dataengineering`, `ExperiencedD
 python -m scrapers.extract [--limit 40] [--batch-size 8] [--max-requests N] [--dry-run]
 ```
 
-Takes `raw_signals` with `processed_at` null (oldest first) and sends them in batches of
+Takes `raw_signals` with `processed_at` null, ranked best-first by `prioritize.py` (see
+below), and sends the top `--limit` in batches of
 `--batch-size` (default 8, max 15) with prompt `extract_signal_batch_v1` through the
 `LLM_*`-selected client: one request classifies the whole batch (IF-49). The model returns
 a JSON array keyed by signal `id`; every item is validated on its own
@@ -105,6 +107,23 @@ a JSON array keyed by signal `id`; every item is validated on its own
 - Post text is untrusted: each post fenced in its own `<signal id="…">` tag, any
   `<signal…>`/`</signal>` look-alike in the text neutralised, title/body truncated; the system prompt forbids following it and
   forbids inventing facts (null / `Unspecified` when absent).
+
+### Which signals get the LLM budget (`prioritize.py`, IF-50)
+
+Cheap, deterministic, no LLM, no new dependencies. Nothing is ever deleted from `raw_signals`.
+
+- **Skip rule:** stripped `title` + `body` shorter than `MIN_TEXT_CHARS` (40) → marked
+  processed (`processed_at` set) with **no** `signal_extractions` row, so it never uses a
+  request. "Processed without an extraction row" = skipped by the pre-filter. The count is
+  printed as `skipped=` in the extract summary (dry-run marks nothing).
+- **Priority score** (higher first, ties by lower id):
+
+| Term | Formula |
+|---|---|
+| Engagement | `2.0 × log10(1 + score + 2 × comments)` (negatives → 0) |
+| Body length | `2.0 × min(1, len(body) / 1500)` |
+| Pain phrases | `1.5 ×` distinct hits in title/body (`workaround`, `broken`, `how do i`, `is there a tool`, `manually`, `we pay`, …), max 4 |
+| B2B terms | `1.0 ×` distinct word/tag hits (`team`, `production`, `api`, `integration`, `invoice`, `devops`, …), max 3 |
 
 ## Embed (raw_signals)
 

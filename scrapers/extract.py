@@ -2,7 +2,11 @@
 
     python -m scrapers.extract [--limit N] [--batch-size B] [--max-requests R] [--dry-run]
 
-Takes raw_signals with processed_at null (oldest first) and sends them to the
+Takes raw_signals with processed_at null, ranked by ``scrapers.prioritize`` (cheap,
+deterministic, no LLM; IF-50) so the daily budget goes to the likeliest B2B pain posts
+first. Signals with almost no text are marked processed without an extraction row
+("skipped", counted in the summary) and never consume a request. The best ``--limit``
+are sent to the
 provider-agnostic LLMClient (LLM_* env vars) in batches of ``--batch-size`` (default 8,
 max 15) with prompt ``extract_signal_batch_v1``: one request classifies a whole batch,
 which stretches a small daily quota (IF-49). Every returned item is validated with the
@@ -32,6 +36,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from scrapers import prioritize
 from scrapers.config import MissingSecretError
 from scrapers.http_client import HttpError, QuotaExhausted
 from scrapers.llm.base import LLMClient, ProviderNotSupportedError
@@ -280,10 +285,18 @@ def run(argv: Sequence[str] | None = None, *,
         return 2
 
     try:
-        signals = store.fetch_unprocessed_signals(args.limit)
+        ranked, skipped = prioritize.plan(store.fetch_unprocessed_pool())
     except HttpError as exc:
         print(f"error: could not read raw_signals (HTTP {exc.status})", file=out)
         return 1
+    signals = ranked[:args.limit]
+    if not args.dry_run:
+        try:
+            for sig in skipped:  # processed_at set, no extraction row = pre-filter skip
+                store.mark_processed(int(sig["id"]), now())
+        except HttpError as exc:
+            print(f"error: could not mark skipped signals (HTTP {exc.status})", file=out)
+            return 1
 
     runner = Runner(llm, store, Budget(llm, args.max_requests), now, args.dry_run, out)
     try:
@@ -299,7 +312,8 @@ def run(argv: Sequence[str] | None = None, *,
     prompt = prompt_v1.PROMPT_VERSION if args.batch_size == 1 else prompt_batch.PROMPT_VERSION
     print(
         f"extract mode={mode} provider={llm.provider} model={llm.model} "
-        f"prompt={prompt} batch_size={args.batch_size} candidates={len(signals)} "
+        f"prompt={prompt} batch_size={args.batch_size} unprocessed={len(ranked)} "
+        f"skipped={len(skipped)} candidates={len(signals)} "
         f"requests={runner.budget.used} batched_ok={stats.batched_ok} "
         f"retried_alone={stats.retried_alone} "
         f"processed={stats.processed} pain_points={stats.pain_points} "

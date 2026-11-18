@@ -152,6 +152,15 @@ class SupabaseStore:
             "limit": limit,
         })
 
+    def fetch_unprocessed_pool(self) -> list[dict[str, Any]]:
+        """Every raw_signal not yet extracted, with the fields ``scrapers.prioritize``
+        ranks on (paged; extract picks the best ones for its LLM budget)."""
+        return self.select_all(RAW_SIGNALS_TABLE, {
+            "select": "id,source_platform,title,body,tags,score,comment_count",
+            "processed_at": "is.null",
+            "order": "id.asc",
+        })
+
     def save_extraction(self, row: Mapping[str, Any]) -> None:
         """Upsert one signal_extractions row (unique on signal_id)."""
         self._post(SIGNAL_EXTRACTIONS_TABLE, [dict(row)],
