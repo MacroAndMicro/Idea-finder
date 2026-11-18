@@ -198,3 +198,14 @@ per run (free-tier quotas) and the rest wait for the next run. `--dry-run` = no 
   function `insert_card_with_links(card jsonb, signal_ids bigint[])` (PostgREST RPC,
   service_role only), so a failed link can never leave a card without evidence.
 - A quota-exhausted provider response stops the run at once.
+- **Quality gate (IF-62, `card_quality.py`).** Before a new card is embedded or written,
+  pure non-LLM checks run on the row: `trigger_counts` (every "N posts / mentions /
+  signals / threads / reports / issues / questions" equals the cluster's signal count and
+  every "N platforms / sources / sites" its platform count — digits and one…twenty),
+  `snippet_in_evidence` (normalised snippet occurs in a member signal's title + body),
+  `problem_statement_sentences` (1–2), `economic_intent_enum`, `mvp_wedge_nonempty`,
+  `duct_tape_nonempty`, `confidence_range` (integer 1–100). Any failure → no card; the
+  cluster is remembered in `synthesis_rejections` with reason `quality:<rule>[,<rule>…]`
+  (so it costs no LLM call again until its signals or the prompt change). Each non-dry run
+  prints `quality_gate passed=N failed=M <rule>=count …`. The check is fail-closed: a
+  phrase like "5 data sources" in the model's text fails `trigger_counts` on purpose.

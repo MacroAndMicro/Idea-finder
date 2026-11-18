@@ -9,8 +9,11 @@
      link any new signals and refresh the card's counts, dates, confidence and the
      frequency sentence of ``trigger_context``. No LLM call. Nothing new → unchanged.
    - **New**: the LLM (prompt ``synthesize_card_v1``) writes title + narrative fields
-     from the cluster's evidence only; output is schema-validated (one retry). The
-     card text is embedded and compared with existing cards: cosine similarity >=
+     from the cluster's evidence only; output is schema-validated (one retry), then
+     the row is checked by the deterministic quality gate (``scrapers.card_quality``,
+     IF-62): any failed rule keeps it out and the cluster is remembered with reason
+     ``quality:<rules>``. The card text is embedded and compared with existing
+     cards: cosine similarity >=
      ``CARD_DUPLICATE_THRESHOLD`` → merged into that card instead of inserting.
      Otherwise a new ``opportunity_cards`` row + its ``card_signals`` links are written
      atomically (SQL function ``insert_card_with_links``, IF-48).
@@ -42,6 +45,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from scrapers.card_quality import RULES as QUALITY_RULES
+from scrapers.card_quality import EvidenceText, check_card, rejection_reason
 from scrapers.cluster import (
     SIMILARITY_THRESHOLD,
     Cluster,
@@ -112,6 +117,9 @@ class SynthStats:
     errors: int = 0
     would_create: int = 0
     skipped_rejected: int = 0
+    gate_passed: int = 0
+    gate_failed: int = 0
+    gate_rules: Counter[str] = field(default_factory=Counter)
     card_ids: list[int] = field(default_factory=list)
 
 
@@ -309,9 +317,10 @@ class Synthesizer:
         self.store.update_card(card_id, values)
         return True
 
-    def create(self, card: dict[str, Any], items: Sequence[Evidence], vec: list[float],
-               llm: LLMClient, embedder: EmbeddingClient) -> int:
-        row = {
+    def build_row(self, card: dict[str, Any], items: Sequence[Evidence],
+                  llm: LLMClient) -> dict[str, Any]:
+        """The opportunity_cards row for a new card, without its embedding."""
+        return {
             "title": card["title"],
             "problem_statement": card["problem_statement"],
             "trigger_context": trigger_context(card["trigger_when"], items),
@@ -319,11 +328,14 @@ class Synthesizer:
             "duct_tape_solutions": card["duct_tape_solutions"],
             "mvp_wedge": card["mvp_wedge"],
             **computed_fields(items, self.now),
-            "embedding": vector_literal(vec),
-            "embedding_model": embedder.embedding_model,
             "llm_model": llm.model,
             "prompt_version": prompt_v1.PROMPT_VERSION,
         }
+
+    def create(self, card: dict[str, Any], row: dict[str, Any], items: Sequence[Evidence],
+               vec: list[float], embedder: EmbeddingClient) -> int:
+        row = {**row, "embedding": vector_literal(vec),
+               "embedding_model": embedder.embedding_model}
         ids = {e.signal.signal_id for e in items}
         card_id = self.store.insert_card_with_links(row, ids)
         self.links[card_id] = ids
@@ -413,6 +425,15 @@ def run(argv: Sequence[str] | None = None, *,
                 stats.rejected += 1
                 synth.remember_rejection(ids, "rejected", llm)
                 continue
+            row = synth.build_row(card, evidence, llm)
+            failed = check_card(row, [EvidenceText(e.title, e.body, e.signal.platform)
+                                      for e in evidence])
+            if failed:
+                stats.gate_failed += 1
+                stats.gate_rules.update(failed)
+                synth.remember_rejection(ids, rejection_reason(failed), llm)
+                continue
+            stats.gate_passed += 1
             vec = embedder.embed([card_text(card)])[0]
             dup, sim = nearest_card(vec, synth.cards)
             if dup is not None and sim >= CARD_DUPLICATE_THRESHOLD:
@@ -420,7 +441,7 @@ def run(argv: Sequence[str] | None = None, *,
                 stats.merged += 1
                 stats.card_ids.append(dup)
             else:
-                stats.card_ids.append(synth.create(card, evidence, vec, llm, embedder))
+                stats.card_ids.append(synth.create(card, row, evidence, vec, embedder))
                 stats.created += 1
         except QuotaExhausted as exc:
             stats.errors += 1
@@ -450,6 +471,11 @@ def run(argv: Sequence[str] | None = None, *,
         + (f" card_ids={','.join(map(str, stats.card_ids))}" if stats.card_ids else ""),
         file=out,
     )
+    if not args.dry_run:
+        print("quality_gate "
+              f"passed={stats.gate_passed} failed={stats.gate_failed} "
+              + " ".join(f"{rule}={stats.gate_rules[rule]}" for rule in QUALITY_RULES),
+              file=out)
     return 0 if stats.errors == 0 else 1
 
 
