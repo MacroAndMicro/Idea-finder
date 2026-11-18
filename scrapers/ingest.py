@@ -25,7 +25,7 @@ from pathlib import Path
 
 from scrapers import config
 from scrapers.adapters.base import SourceAdapter
-from scrapers.adapters.github import GitHubIssuesAdapter
+from scrapers.adapters.github import GitHubAdapter
 from scrapers.adapters.hackernews import HackerNewsAdapter
 from scrapers.adapters.reddit import RedditAdapter
 from scrapers.adapters.stackexchange import StackExchangeAdapter
@@ -38,7 +38,7 @@ log = logging.getLogger("scrapers.ingest")
 
 ADAPTERS: dict[str, Callable[[], SourceAdapter]] = {
     "hackernews": HackerNewsAdapter,
-    "github": GitHubIssuesAdapter.from_env,
+    "github": GitHubAdapter.from_env,
     "stackexchange": StackExchangeAdapter.from_env,
     "reddit": RedditAdapter.from_env,
 }
@@ -47,6 +47,7 @@ REQUIRED_KEY = {"github": "GITHUB_TOKEN", "stackexchange": "STACKEXCHANGE_KEY"}
 QUERIES_FILE = Path(__file__).with_name("queries.toml")
 #: Optional list keys per source in queries.toml → (adapter kwarg, overriding env var).
 SOURCE_LISTS: dict[str, dict[str, tuple[str, str]]] = {
+    "github": {"discussions": ("discussion_queries", "GITHUB_DISCUSSION_QUERIES")},
     "stackexchange": {"sites": ("sites", "STACKEXCHANGE_SITES")},
     "reddit": {"subreddits": ("subreddits", "REDDIT_SUBREDDITS")},
 }
@@ -146,11 +147,10 @@ def collect(adapter: SourceAdapter, queries: Sequence[str], since: datetime,
     seen: set[str] = set()
 
     def stream() -> Iterator[RawSignal]:
-        for query in queries:
-            for signal in adapter.fetch(query, since):
-                if signal.external_id not in seen:
-                    seen.add(signal.external_id)
-                    yield signal
+        for signal in adapter.fetch_all(queries, since):
+            if signal.external_id not in seen:
+                seen.add(signal.external_id)
+                yield signal
 
     return itertools.islice(stream(), limit)
 

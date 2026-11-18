@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import abc
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import datetime
 
 from scrapers.http_client import HttpClient
@@ -21,3 +21,9 @@ class SourceAdapter(abc.ABC):
     @abc.abstractmethod
     def fetch(self, query: str, since: datetime) -> Iterator[RawSignal]:
         """Yield normalized signals matching ``query`` created after ``since`` (UTC)."""
+
+    def fetch_all(self, queries: Sequence[str], since: datetime) -> Iterator[RawSignal]:
+        """Signals for every query, in order. Adapters with several streams (e.g. GitHub
+        issues + discussions) override this to interleave them under one ``--limit``."""
+        for query in queries:
+            yield from self.fetch(query, since)
