@@ -43,6 +43,12 @@ logging:
     level: "%5p [%X{requestId:-}]"
 
 app:
+  rate-limit:
+    # IF-67: per-client-IP token bucket on /api/** (/api/health exempt).
+    per-minute: ${API_RATE_LIMIT_PER_MINUTE:120}
+    max-clients: ${API_RATE_LIMIT_MAX_CLIENTS:10000}
+    # true only when a trusted reverse proxy sets X-Forwarded-For; otherwise clients could spoof it.
+    trust-forwarded-for: ${API_TRUST_FORWARDED_FOR:false}
   health:
     # IF-66: query timeout of the select 1 behind GET /api/health.
     db-timeout-seconds: ${HEALTH_DB_TIMEOUT_SECONDS:2}

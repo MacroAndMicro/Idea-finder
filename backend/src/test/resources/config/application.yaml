@@ -1,0 +1,6 @@
+# Test-only overrides, merged on top of src/main/resources/application.yaml.
+app:
+  rate-limit:
+    # IF-67: all MockMvc requests share 127.0.0.1; keep the shared test contexts far below the limit.
+    # RateLimitFilterTest sets its own low limit.
+    per-minute: 1000000
