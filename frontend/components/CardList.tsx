@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { errorMessage, fetchCards, queryFromParams, queryToParams, type CardQuery } from "@/lib/api";
 import type { OpportunityCard, PageResponse } from "@/lib/types";
 import OpportunityCardView from "./OpportunityCardView";
+import SearchBox from "./SearchBox";
 
 const selectCls =
   "min-h-11 rounded border border-border bg-surface px-2 text-sm text-foreground";
@@ -20,10 +21,13 @@ export default function CardList() {
   const router = useRouter();
   const pathname = usePathname();
   const query = useMemo(() => queryFromParams(new URLSearchParams(params.toString())), [params]);
-  const setQuery = (next: CardQuery) => {
-    const qs = queryToParams(next).toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  };
+  const setQuery = useCallback(
+    (next: CardQuery) => {
+      const qs = queryToParams(next).toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [router, pathname],
+  );
   const [result, setResult] = useState<{ key: string; state: State } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const key = `${JSON.stringify(query)}#${attempt}`;
@@ -42,9 +46,11 @@ export default function CardList() {
   }, [query, key]);
 
   const set = (patch: Partial<CardQuery>) => setQuery({ ...query, ...patch, page: 0 });
+  const onSearch = useCallback((q: string | undefined) => setQuery({ ...query, q, page: 0 }), [query, setQuery]);
 
   return (
     <div className="flex flex-col gap-6">
+      <SearchBox value={query.q ?? ""} onSearch={onSearch} />
       <form className="flex flex-wrap items-end gap-4" aria-label="Filter opportunities" onSubmit={(e) => e.preventDefault()}>
         <label className="flex flex-col gap-1 text-sm font-medium">
           Source
@@ -111,17 +117,31 @@ export default function CardList() {
         )}
         {state.kind === "ok" && state.data.items.length === 0 && (
           <div className="rounded-lg border border-dashed border-border p-8 text-center">
-            <p className="font-medium">No opportunity cards yet</p>
-            <p className="mt-1 text-sm text-muted">
-              Cards appear once signals are ingested and extracted. Try loosening the filters.
-            </p>
+            {query.q ? (
+              <>
+                <p className="font-medium">
+                  No opportunities match “<span className="break-words">{query.q}</span>”
+                </p>
+                <p className="mt-1 text-sm text-muted">Try a shorter or different keyword, or loosen the filters.</p>
+              </>
+            ) : (
+              <>
+                <p className="font-medium">No opportunity cards yet</p>
+                <p className="mt-1 text-sm text-muted">
+                  Cards appear once signals are ingested and extracted. Try loosening the filters.
+                </p>
+              </>
+            )}
           </div>
         )}
       </div>
 
       {state.kind === "ok" && state.data.items.length > 0 && (
         <>
-          <p className="text-sm text-muted">{state.data.total_elements} opportunities</p>
+          <p className="text-sm text-muted">
+            {state.data.total_elements} {state.data.total_elements === 1 ? "opportunity" : "opportunities"}
+            {query.q && <> matching “<span className="break-words">{query.q}</span>”</>}
+          </p>
           <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {state.data.items.map((c) => (
               <li key={c.id} className="flex">

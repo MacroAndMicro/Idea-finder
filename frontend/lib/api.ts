@@ -3,6 +3,8 @@ import type { OpportunityCard, PageResponse, Signal, Stats } from "./types";
 const BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080").replace(/\/$/, "");
 
 export interface CardQuery {
+  /** Keyword search (title, problem statement, duct-tape solutions). */
+  q?: string;
   source?: string;
   intent?: string;
   minConfidence?: string;
@@ -13,11 +15,22 @@ export interface CardQuery {
 
 export const SORTS = ["confidence", "recent", "newest"] as const;
 
+/** The API accepts q of 2–100 characters after trimming. */
+export const Q_MIN = 2;
+export const Q_MAX = 100;
+
+/** Normalise a search term: trimmed, and dropped unless the API would accept it. */
+export function cleanQ(raw: string | null | undefined): string | undefined {
+  const t = (raw ?? "").trim().slice(0, Q_MAX);
+  return t.length >= Q_MIN ? t : undefined;
+}
+
 /** Parse filter state from URL search params (unknown values are dropped). */
 export function queryFromParams(p: URLSearchParams): CardQuery {
   const sort = p.get("sort") ?? "";
   const page = Number(p.get("page"));
   return {
+    q: cleanQ(p.get("q")),
     source: p.get("source") ?? undefined,
     intent: p.get("intent") ?? undefined,
     minConfidence: p.get("minConfidence") ?? undefined,
@@ -30,6 +43,7 @@ export function queryFromParams(p: URLSearchParams): CardQuery {
 /** Serialize filter state for the page URL (defaults omitted to keep URLs short). */
 export function queryToParams(q: CardQuery): URLSearchParams {
   const p = new URLSearchParams();
+  if (q.q) p.set("q", q.q);
   if (q.source) p.set("source", q.source);
   if (q.intent) p.set("intent", q.intent);
   if (q.minConfidence) p.set("minConfidence", q.minConfidence);
@@ -39,16 +53,23 @@ export function queryToParams(q: CardQuery): URLSearchParams {
   return p;
 }
 
+/** Filter params shared by /api/cards and /api/cards/facets. */
+function filterParams(q: CardQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  if (q.q) params.set("q", q.q);
+  if (q.source) params.set("source", q.source);
+  if (q.intent) params.set("intent", q.intent);
+  if (q.minConfidence) params.set("minConfidence", q.minConfidence);
+  if (q.b2b) params.set("b2b", "true");
+  return params;
+}
+
 export async function fetchCards(
   q: CardQuery,
   signal?: AbortSignal,
 ): Promise<PageResponse<OpportunityCard>> {
-  const params = new URLSearchParams();
-  if (q.source) params.set("source", q.source);
-  if (q.intent) params.set("intent", q.intent);
-  if (q.minConfidence) params.set("minConfidence", q.minConfidence);
+  const params = filterParams(q);
   params.set("sort", q.sort || "confidence");
-  if (q.b2b) params.set("b2b", "true");
   params.set("page", String(q.page ?? 0));
   params.set("size", "12");
   return getJson(`/api/cards?${params}`, signal);
