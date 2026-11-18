@@ -36,6 +36,8 @@ Env vars: `GITHUB_TOKEN`, `GITHUB_DISCUSSION_QUERIES` (optional), `STACKEXCHANGE
 
 ## Daily run (one command)
 
+Operator runbook (prerequisites, output, failures): [`docs/pipeline-ops.md`](../docs/pipeline-ops.md).
+
 ```
 python -m scrapers.pipeline [--sources hackernews,github,stackexchange,reddit]
     [--extract-limit 112] [--extract-batch-size 8] [--extract-max-requests 18]
