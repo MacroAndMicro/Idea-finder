@@ -5,6 +5,8 @@ import io
 import pytest
 
 from scrapers import pipeline
+from scrapers.config import MissingSecretError
+from scrapers.http_client import HttpError
 
 ALL_KEYS = ("GITHUB_TOKEN", "STACKEXCHANGE_KEY", "REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET",
             "REDDIT_USER_AGENT")
@@ -27,6 +29,13 @@ class Recorder:
 
     def stages(self):
         return {n: self.stage(n) for n in ("ingest", "extract", "embed", "synthesize")}
+
+
+@pytest.fixture(autouse=True)
+def _no_supabase_backlog(monkeypatch):
+    def _missing():
+        raise MissingSecretError("SUPABASE_URL")
+    monkeypatch.setattr(pipeline, "_default_backlog", _missing)
 
 
 @pytest.fixture
@@ -117,3 +126,56 @@ def test_default_extract_budget_fits_free_tier(keys):
     argv = dict(zip(rec.calls[1][1][::2], rec.calls[1][1][1::2], strict=True))
     assert argv == {"--limit": "112", "--batch-size": "8", "--max-requests": "18"}
     assert pipeline.DEFAULT_EXTRACT_MAX_REQUESTS + pipeline.DEFAULT_SYNTHESIZE_LIMIT == 20
+
+
+# ---- IF-65 backlog report ----
+
+def _sig(i, src, processed=False):
+    return {"id": i, "source_platform": src,
+            "processed_at": "2026-11-18T00:00:00+00:00" if processed else None}
+
+
+def test_days_to_clear():
+    assert pipeline.days_to_clear(0, 112) == 0
+    assert pipeline.days_to_clear(1, 112) == 1
+    assert pipeline.days_to_clear(112, 112) == 1
+    assert pipeline.days_to_clear(113, 112) == 2
+    assert pipeline.days_to_clear(5, 0) is None
+
+
+def test_backlog_rows_per_source_and_total():
+    signals = [_sig(1, "github", True), _sig(2, "github", True), _sig(3, "github"),
+               _sig(4, "hackernews"), _sig(5, "hackernews"), _sig(6, "stackexchange", True)]
+    rows = pipeline.backlog_rows(signals, {1, 6}, per_day=2)
+    by = {r.source: r for r in rows}
+    assert [r.source for r in rows] == ["github", "hackernews", "stackexchange", "total"]
+    assert by["github"] == pipeline.BacklogRow("github", 3, 1, 1, 1, 1)
+    assert by["hackernews"] == pipeline.BacklogRow("hackernews", 2, 0, 0, 2, 1)
+    assert by["stackexchange"].unprocessed == 0 and by["stackexchange"].days_to_clear == 0
+    assert by["total"] == pipeline.BacklogRow("total", 6, 2, 1, 3, 2)
+    assert pipeline.backlog_rows([], set(), 2) == []
+
+
+def test_pipeline_prints_backlog_lines(keys):
+    out = io.StringIO()
+    rec = Recorder()
+    code = pipeline.run(["--sources", "hackernews", "--extract-limit", "10"],
+                        stages=rec.stages(),
+                        backlog=lambda: ([_sig(i, "hackernews") for i in range(1, 26)], set()),
+                        out=out)
+    text = out.getvalue()
+    assert code == 0
+    assert ("backlog source=hackernews ingested=25 extracted=0 skipped=0 unprocessed=25 "
+            "days_to_clear=3 per_day=10") in text
+    assert "backlog source=total" in text
+
+
+def test_backlog_read_failure_never_fails_pipeline(keys):
+    def boom():
+        raise HttpError(503, "https://proj.supabase.co/rest/v1/raw_signals")
+    out = io.StringIO()
+    code = pipeline.run(["--sources", "hackernews"], stages=Recorder().stages(),
+                        backlog=boom, out=out)
+    assert code == 0 and "backlog skipped: read failed (HTTP 503)" in out.getvalue()
+    _, text = run(["--sources", "hackernews"], Recorder())
+    assert "backlog skipped: missing SUPABASE_URL" in text

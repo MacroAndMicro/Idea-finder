@@ -191,6 +191,15 @@ class SupabaseStore:
         self.patch(RAW_SIGNALS_TABLE, {"id": f"eq.{int(signal_id)}"},
                    {"embedding": vector, "embedding_model": model})
 
+    def fetch_backlog(self) -> tuple[list[dict[str, Any]], set[int]]:
+        """Read-only backlog view for ``scrapers.pipeline`` (IF-65): every raw_signal's
+        (id, source_platform, processed_at) and the ids that have an extraction row."""
+        signals = self.select_all(RAW_SIGNALS_TABLE, {
+            "select": "id,source_platform,processed_at", "order": "id.asc"})
+        extracted = self.select_all(SIGNAL_EXTRACTIONS_TABLE, {
+            "select": "signal_id", "order": "signal_id.asc"})
+        return signals, {int(r["signal_id"]) for r in extracted if r.get("signal_id") is not None}
+
     # ---- card synthesis (scrapers.synthesize) ----
 
     def fetch_cluster_candidates(self) -> list[dict[str, Any]]:

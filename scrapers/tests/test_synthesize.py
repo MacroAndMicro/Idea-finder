@@ -372,3 +372,58 @@ def test_zero_and_wrong_size_vectors_are_skipped():
     store = StubStore([zero, row(102, 0)], cards=old_card)
     code, out = run_cli(["--min-signals", "1"], store, SeqLLM([card_json()]))
     assert code == 0 and "signals=1" in out and "created=1" in out
+
+
+# ---- IF-62 quality gate ----
+
+def test_quality_gate_blocks_invented_counts_and_remembers_cluster():
+    store = StubStore(two_clusters())
+    embedder = FakeEmbeddingClient()
+    llm = SeqLLM([card_json(trigger_when="Reported in 40 GitHub issues every week."),
+                  card_json(title="Second problem")])
+    code, out = run_cli([], store, llm, embedder)
+    assert code == 0 and len(store.cards) == 1
+    assert "created=1" in out
+    assert ("quality_gate passed=1 failed=1 trigger_counts=1 snippet_in_evidence=0 "
+            "problem_statement_sentences=0") in out
+    (rej,) = store.rejections.values()
+    assert rej["reason"] == "quality:trigger_counts"
+    # remembered: the next run spends no LLM call on it
+    llm2 = SeqLLM([])
+    code, out = run_cli([], store, llm2)
+    assert code == 0 and llm2.calls == [] and "skipped_rejected=1" in out
+
+
+def test_quality_gate_blocks_multi_sentence_problem_statement():
+    store = StubStore(two_clusters()[:2])
+    code, out = run_cli([], store, SeqLLM([card_json(problem_statement="A. B. C.")]))
+    assert code == 0 and store.cards == {}
+    assert "failed=1" in out and "problem_statement_sentences=1" in out
+    assert next(iter(store.rejections.values()))["reason"] == \
+        "quality:problem_statement_sentences"
+
+
+def test_dry_run_prints_no_quality_line():
+    _, out = run_cli(["--dry-run"], StubStore(two_clusters()), SeqLLM([]))
+    assert "quality_gate" not in out
+
+
+# ---- IF-64 only classified B2B pain signals are clustered ----
+
+def test_cluster_candidates_require_b2b_pain_extraction(make_client):
+    client, transport = make_client([ok(json.dumps([]).encode())])
+    SupabaseStore("https://proj.supabase.co", SECRET, client).fetch_cluster_candidates()
+    url = transport.requests[0].url
+    assert "signal_extractions%21inner" in url or "signal_extractions!inner" in url
+    assert "signal_extractions.is_pain_point=is.true" in url
+    assert "signal_extractions.is_b2b=is.true" in url
+
+
+def test_embedded_signal_without_extraction_is_never_clustered():
+    unextracted = {**row(201, 0), "signal_extractions": None}
+    empty = {**row(202, 0, wobble=0.01), "signal_extractions": []}
+    assert synthesize.to_evidence(unextracted) is None
+    assert synthesize.to_evidence(empty) is None
+    code, out = run_cli(["--dry-run", "--min-signals", "1"],
+                        StubStore([unextracted, empty, row(203, 0)]), SeqLLM([]))
+    assert code == 0 and "signals=1 clusters=1" in out

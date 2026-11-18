@@ -59,6 +59,19 @@ with a note; a failing source or stage is reported and the rest still run. Print
 `stage=… status=…` line per stage plus a `pipeline status=…` total; exit 0 only if no
 stage failed. `--dry-run` = ingest/embed/synthesize dry-runs, extract skipped.
 
+**Backlog (IF-65).** At the end the pipeline prints, read-only, one line per source plus a
+`total` line:
+
+```
+backlog source=github ingested=50 extracted=8 skipped=0 unprocessed=42 days_to_clear=1 per_day=112
+```
+
+`extracted` = has a `signal_extractions` row, `skipped` = processed by the pre-filter with no
+row, `unprocessed` = `processed_at` null, `days_to_clear = ceil(unprocessed / --extract-limit)`
+(one pipeline run per day). Each source line assumes the whole daily budget; the `total`
+line is the shared-budget estimate. Missing Supabase secrets or a failed read print
+`backlog skipped: …` and never fail the pipeline.
+
 ## Ingest
 
 ```
@@ -157,6 +170,26 @@ most similar existing cluster centroid if similarity >= `SIMILARITY_THRESHOLD` (
 overridable per call), else starts a new cluster; ties go to the older cluster.
 Vectors must be 1536-d.
 
+### Threshold calibration (IF-63)
+
+```
+python -m scrapers.cluster --report [--min-signals 2]
+```
+
+Read-only: prints the pairwise similarity histogram of the embedded B2B pain signals and
+cluster count / sizes / qualifying clusters at thresholds 0.70–0.90 (step 0.02).
+
+Findings, 2026-11-18 (`gemini/gemini-embedding-2`, 6 embedded B2B pain signals, 15 pairs):
+similarity min 0.539 · median 0.629 · max 0.716. At every threshold 0.72–0.90 all 6 are
+singletons; at 0.70 one 3-signal cluster forms around the 0.716 pair. On reading them, the
+6 signals are 6 different problems (the 0.716 pair is two different complaints about one
+agent tool), so the singletons come from unrelated signals, not from a strict threshold.
+For this model unrelated-but-same-domain posts already score 0.54–0.72, so the threshold
+must stay clearly above ~0.72. **`SIMILARITY_THRESHOLD` stays 0.82**; re-run the report
+once there are real same-pain pairs to check the upper side.
+`tests/test_cluster_threshold.py` checks the mechanics on a synthetic labelled fixture
+(`tests/fixtures/cluster/labelled_pairs.json`, 10 same-pain + 10 different-pain pairs).
+
 Confidence score (rounded, clamped to 1–100; weights sum to 100):
 
 | Factor | Weight | Formula |
@@ -198,3 +231,14 @@ per run (free-tier quotas) and the rest wait for the next run. `--dry-run` = no 
   function `insert_card_with_links(card jsonb, signal_ids bigint[])` (PostgREST RPC,
   service_role only), so a failed link can never leave a card without evidence.
 - A quota-exhausted provider response stops the run at once.
+- **Quality gate (IF-62, `card_quality.py`).** Before a new card is embedded or written,
+  pure non-LLM checks run on the row: `trigger_counts` (every "N posts / mentions /
+  signals / threads / reports / issues / questions" equals the cluster's signal count and
+  every "N platforms / sources / sites" its platform count — digits and one…twenty),
+  `snippet_in_evidence` (normalised snippet occurs in a member signal's title + body),
+  `problem_statement_sentences` (1–2), `economic_intent_enum`, `mvp_wedge_nonempty`,
+  `duct_tape_nonempty`, `confidence_range` (integer 1–100). Any failure → no card; the
+  cluster is remembered in `synthesis_rejections` with reason `quality:<rule>[,<rule>…]`
+  (so it costs no LLM call again until its signals or the prompt change). Each non-dry run
+  prints `quality_gate passed=N failed=M <rule>=count …`. The check is fail-closed: a
+  phrase like "5 data sources" in the model's text fails `trigger_counts` on purpose.
