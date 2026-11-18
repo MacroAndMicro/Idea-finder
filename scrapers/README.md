@@ -13,7 +13,8 @@ scrapers/
   store.py           SupabaseStore: idempotent insert into raw_signals (+ ingestion_runs if present)
   prioritize.py      deterministic ranking + skip rule for which signals extract spends LLM requests on
   cluster.py         pure clustering of pain-point signals + 1–100 confidence score
-  ingest.py          CLI: python -m scrapers.ingest --source {hackernews,github,stackexchange}
+  ingest.py          CLI: python -m scrapers.ingest --source {hackernews,github,stackexchange,reddit}
+  queries.toml       reviewed default queries / sites / subreddits per source
   embed.py           CLI: python -m scrapers.embed — 1536-d embeddings on raw_signals
   extract.py         CLI: python -m scrapers.extract — per-signal LLM extraction → signal_extractions
   synthesize.py      CLI: python -m scrapers.synthesize — clusters → opportunity_cards + card_signals
@@ -67,6 +68,16 @@ python -m scrapers.ingest --source {github,hackernews,reddit,stackexchange} [--l
 Needs `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (not for `--dry-run`). Re-runs are safe:
 rows already present for `(source_platform, external_id)` are skipped, never overwritten.
 
+### Default queries — `scrapers/queries.toml` (IF-51)
+
+Without `--query`, ingest uses the per-source queries in `scrapers/queries.toml` (read with
+stdlib `tomllib`). Each entry has a one-line comment naming the B2B pain it targets, so a
+merge request that changes the file is the review record. The file can also hold
+`[stackexchange] sites` and `[reddit] subreddits`; `STACKEXCHANGE_SITES` /
+`REDDIT_SUBREDDITS` still override them. A test fails if an `ingest.ADAPTERS` source has no
+entry, if an unknown source (e.g. `g2`) appears, or if an entry lacks its comment. Keep
+it short: every query costs API requests (adapters keep their rate limits and page caps).
+
 ### Reddit
 
 Official OAuth API only, app-only client credentials: token from
@@ -78,8 +89,8 @@ writes nothing. Honors `X-Ratelimit-Remaining` / `X-Ratelimit-Reset` (seconds un
 and spaces requests 1 s apart. Submissions only (subreddit search, newest first, stops at
 `--since-days`); NSFW, promoted and stickied posts are skipped. Comments are not fetched yet.
 
-Default subreddits (B2B / developer workflow pain; override with `REDDIT_SUBREDDITS`,
-comma-separated): `sysadmin`, `devops`, `SaaS`, `dataengineering`, `ExperiencedDevs`,
+Default subreddits (B2B / developer workflow pain; listed in `queries.toml`, override
+with `REDDIT_SUBREDDITS`, comma-separated): `sysadmin`, `devops`, `SaaS`, `dataengineering`, `ExperiencedDevs`,
 `msp`, `salesforce`, `analytics`.
 
 ## Extract (per-signal LLM)
