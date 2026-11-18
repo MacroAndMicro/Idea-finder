@@ -10,6 +10,44 @@ const INTENT_STYLE: Record<string, string> = {
   Unspecified: "bg-neutral-bg text-muted",
 };
 
+const dateFmt = new Intl.DateTimeFormat("en", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+function When({ iso }: { iso: string }) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return <time dateTime={iso}>{dateFmt.format(d)}</time>;
+}
+
+/** Evidence spread behind the card: how many signals, from how many platforms, over what window. */
+function Spread({ card }: { card: OpportunityCard }) {
+  const { signal_count: n, platform_count: p, first_seen_at: first, last_seen_at: last } = card;
+  if (n == null && p == null && !first && !last) return null;
+  return (
+    <p className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+      {n != null && (
+        <span>
+          <span className="font-semibold text-foreground tabular-nums">{n}</span> {n === 1 ? "signal" : "signals"}
+        </span>
+      )}
+      {p != null && (
+        <span>
+          <span className="font-semibold text-foreground tabular-nums">{p}</span> {p === 1 ? "source" : "sources"}
+        </span>
+      )}
+      {first && last && (
+        <span>
+          Seen <When iso={first} /> – <When iso={last} />
+        </span>
+      )}
+      {!first && last && (
+        <span>
+          Last seen <When iso={last} />
+        </span>
+      )}
+    </p>
+  );
+}
+
 function Field({ label, value, open }: { label: string; value: string | null; open: boolean }) {
   return (
     <div>
@@ -38,6 +76,7 @@ export default function OpportunityCardView({ card }: { card: OpportunityCard })
             Economic intent: {intent}
           </span>
         </div>
+        <Spread card={card} />
         {score != null && (
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted">Confidence</span>

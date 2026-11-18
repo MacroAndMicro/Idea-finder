@@ -23,6 +23,12 @@ export interface OpportunityCard {
   source_platform: SourcePlatform;
   source_url: string | null;
   raw_content_snippet: string | null;
+  /** Number of source signals clustered into this card (null for legacy cards). */
+  signal_count: number | null;
+  /** Number of distinct source platforms among those signals. */
+  platform_count: number | null;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
   created_at: string;
 }
 

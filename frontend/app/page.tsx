@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import CardList from "@/components/CardList";
 
 export default function Home() {
@@ -7,7 +8,9 @@ export default function Home() {
       <p className="mb-6 mt-1 max-w-2xl text-sm text-muted">
         Evidence-backed software opportunities mined from real developer and business feedback.
       </p>
-      <CardList />
+      <Suspense fallback={<p className="text-muted">Loading opportunities…</p>}>
+        <CardList />
+      </Suspense>
     </>
   );
 }

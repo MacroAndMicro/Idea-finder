@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { fetchCards, type CardQuery } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { fetchCards, queryFromParams, queryToParams, type CardQuery } from "@/lib/api";
 import type { OpportunityCard, PageResponse } from "@/lib/types";
 import OpportunityCardView from "./OpportunityCardView";
 
@@ -14,7 +15,15 @@ type State =
   | { kind: "ok"; data: PageResponse<OpportunityCard> };
 
 export default function CardList() {
-  const [query, setQuery] = useState<CardQuery>({ sort: "confidence", page: 0 });
+  // Filter state lives in the URL so views are shareable and survive reloads.
+  const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const query = useMemo(() => queryFromParams(new URLSearchParams(params.toString())), [params]);
+  const setQuery = (next: CardQuery) => {
+    const qs = queryToParams(next).toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
   const [result, setResult] = useState<{ key: string; state: State } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const key = `${JSON.stringify(query)}#${attempt}`;
@@ -33,7 +42,7 @@ export default function CardList() {
     return () => ctrl.abort();
   }, [query, key]);
 
-  const set = (patch: Partial<CardQuery>) => setQuery((q) => ({ ...q, ...patch, page: 0 }));
+  const set = (patch: Partial<CardQuery>) => setQuery({ ...query, ...patch, page: 0 });
 
   return (
     <div className="flex flex-col gap-6">
@@ -71,8 +80,18 @@ export default function CardList() {
           Sort by
           <select className={selectCls} value={query.sort} onChange={(e) => set({ sort: e.target.value })}>
             <option value="confidence">Confidence</option>
-            <option value="newest">Newest</option>
+            <option value="recent">Most recent activity</option>
+            <option value="newest">Newest card</option>
           </select>
+        </label>
+        <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded border border-border bg-surface px-3 text-sm font-medium">
+          <input
+            type="checkbox"
+            className="size-5 accent-accent"
+            checked={query.b2b ?? false}
+            onChange={(e) => set({ b2b: e.target.checked })}
+          />
+          B2B only
         </label>
       </form>
 
@@ -115,7 +134,7 @@ export default function CardList() {
             <button
               type="button"
               disabled={state.data.page <= 0}
-              onClick={() => setQuery((q) => ({ ...q, page: (q.page ?? 0) - 1 }))}
+              onClick={() => setQuery({ ...query, page: (query.page ?? 0) - 1 })}
               className="min-h-11 rounded border border-border px-4 text-sm disabled:opacity-50"
             >
               Previous
@@ -126,7 +145,7 @@ export default function CardList() {
             <button
               type="button"
               disabled={state.data.page + 1 >= state.data.total_pages}
-              onClick={() => setQuery((q) => ({ ...q, page: (q.page ?? 0) + 1 }))}
+              onClick={() => setQuery({ ...query, page: (query.page ?? 0) + 1 })}
               className="min-h-11 rounded border border-border px-4 text-sm disabled:opacity-50"
             >
               Next
