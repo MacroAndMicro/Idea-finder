@@ -39,7 +39,7 @@ def test_maps_discussions_and_sends_graphql(make_client):
     assert req.headers["Authorization"] == "Bearer tok"
     payload = json.loads(req.body)
     assert "type: DISCUSSION" in payload["query"]
-    assert payload["variables"]["q"] == "workaround created:>2026-11-01"
+    assert payload["variables"]["q"] == "workaround created:>=2026-11-01T00:00:00Z"
     assert payload["variables"]["after"] is None
     # second page follows the cursor
     assert json.loads(transport.requests[1].body)["variables"]["after"] == "Y3Vyc29yOjI="
@@ -118,3 +118,10 @@ def test_discussion_http_failure_never_fails_issues(make_client, caplog):
         ids = [s.external_id for s in adapter.fetch_all(["a"], SINCE)]
     assert ids == ["example-org/example-tool#512"]
     assert "HTTP 403" in caplog.text and "tok" not in caplog.text
+
+
+def test_discussions_since_filter_uses_full_utc_instant():
+    # IF-83: same day-granularity bug as issues.
+    since = datetime(2026, 11, 18, 10, 30, tzinfo=UTC)
+    q = GitHubDiscussionsAdapter.build_query("workaround", since)
+    assert q == "workaround created:>=2026-11-18T10:30:00Z"

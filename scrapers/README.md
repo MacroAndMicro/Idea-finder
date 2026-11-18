@@ -87,7 +87,9 @@ rows already present for `(source_platform, external_id)` are skipped, never ove
 the newest `Success` row in `ingestion_runs` for that source, minus a 1-hour overlap
 (`SINCE_OVERLAP`), never more than 14 days back. With no such row, in `--dry-run`, or if the
 lookup fails, it uses the 14-day default; an explicit `--since-days` always wins. Each run
-prints `since=<iso> reason=last_success|default|flag`.
+prints `since=<iso> reason=last_success|default|flag`. GitHub issues and discussions pass the
+full UTC instant to search (`created:>=YYYY-MM-DDTHH:MM:SSZ`, IF-83); a date-only filter would
+skip the rest of the since day.
 
 ### Default queries — `scrapers/queries.toml` (IF-51)
 

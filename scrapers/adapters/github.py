@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 
 from scrapers import config
 from scrapers.adapters.base import SourceAdapter
@@ -23,6 +23,18 @@ PER_PAGE = 100
 MAX_SEARCH_RESULTS = 1000
 MIN_INTERVAL_SECONDS = 2.5  # 30 req/min search limit → never burst
 BODY_MAX_CHARS = 8000
+
+
+def created_filter(since: datetime) -> str:
+    """GitHub search qualifier including everything created at/after ``since``.
+
+    A date-only ``created:>YYYY-MM-DD`` means "from the next day", which silently
+    dropped the rest of the since day (IF-83). Use the full UTC instant instead;
+    naive datetimes are treated as UTC.
+    """
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=UTC)
+    return f"created:>={since.astimezone(UTC):%Y-%m-%dT%H:%M:%SZ}"
 
 
 class GitHubIssuesAdapter(SourceAdapter):
@@ -48,7 +60,7 @@ class GitHubIssuesAdapter(SourceAdapter):
         return cls(config.get_env("GITHUB_TOKEN"), **kwargs)
 
     def build_query(self, query: str, since: datetime) -> str:
-        parts = [query, "is:issue", f"created:>{since:%Y-%m-%d}"]
+        parts = [query, "is:issue", created_filter(since)]
         if self.min_reactions:
             parts.append(f"reactions:>={self.min_reactions}")
         if self.label:
@@ -148,7 +160,7 @@ class GitHubDiscussionsAdapter(SourceAdapter):
 
     @staticmethod
     def build_query(query: str, since: datetime) -> str:
-        return " ".join(p for p in (query, f"created:>{since:%Y-%m-%d}") if p)
+        return " ".join(p for p in (query, created_filter(since)) if p)
 
     def fetch(self, query: str, since: datetime) -> Iterator[RawSignal]:
         if not self._token:
