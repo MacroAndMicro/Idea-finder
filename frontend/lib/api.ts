@@ -1,4 +1,4 @@
-import type { OpportunityCard, PageResponse, Signal } from "./types";
+import type { OpportunityCard, PageResponse, Signal, Stats } from "./types";
 
 const BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080").replace(/\/$/, "");
 
@@ -81,4 +81,8 @@ export const SIGNALS_PAGE_SIZE = 10;
 
 export function fetchSignals(id: string, page: number, signal?: AbortSignal): Promise<PageResponse<Signal>> {
   return getJson(`/api/cards/${encodeURIComponent(id)}/signals?page=${page}&size=${SIGNALS_PAGE_SIZE}`, signal);
+}
+
+export function fetchStats(signal?: AbortSignal): Promise<Stats> {
+  return getJson("/api/stats", signal);
 }

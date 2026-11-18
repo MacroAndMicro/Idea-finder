@@ -61,3 +61,11 @@ export interface Signal {
   comment_count: number | null;
   source_created_at: string | null;
 }
+
+/** Subset of the backend StatsResponse (GET /api/stats) used by the stats strip. */
+export interface Stats {
+  total_cards: number;
+  cards_by_source: Partial<Record<SourcePlatform, number>>;
+  total_signals: number;
+  signals_by_source: Partial<Record<SourcePlatform, number>>;
+}
