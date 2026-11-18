@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ApiError, errorMessage, fetchCard } from "@/lib/api";
 import { SOURCE_LABELS, type OpportunityCard } from "@/lib/types";
-import { ConfidenceMeter, IntentBadge, SourceBadge, Spread, When } from "./CardMeta";
+import { ConfidenceMeter, IntentBadge, safeHref, SourceBadge, Spread, When } from "./CardMeta";
 import EvidenceList from "./EvidenceList";
 
 type State =
@@ -86,6 +86,7 @@ export default function CardDetail({ id }: { id: string }) {
 }
 
 function CardBody({ card }: { card: OpportunityCard }) {
+  const sourceHref = safeHref(card.source_url);
   return (
     <>
       <title>{`${card.title} · Idea Finder`}</title>
@@ -149,9 +150,9 @@ function CardBody({ card }: { card: OpportunityCard }) {
                 </div>
               )}
             </dl>
-            {card.source_url && (
+            {sourceHref && (
               <a
-                href={card.source_url}
+                href={sourceHref}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex min-h-11 items-center self-start rounded text-sm font-medium text-accent underline-offset-4 hover:underline"

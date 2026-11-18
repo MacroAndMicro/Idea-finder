@@ -83,3 +83,14 @@ export function ConfidenceMeter({ score }: { score: number | null }) {
     </div>
   );
 }
+
+/** Only http(s) links from ingested data are rendered as links (blocks javascript:, data: etc.). */
+export function safeHref(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" || u.protocol === "http:" ? u.href : null;
+  } catch {
+    return null;
+  }
+}

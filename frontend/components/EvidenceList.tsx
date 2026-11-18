@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { errorMessage, fetchSignals } from "@/lib/api";
 import type { Signal } from "@/lib/types";
-import { SourceBadge, When } from "./CardMeta";
+import { safeHref, SourceBadge, When } from "./CardMeta";
 
 type State = {
   items: Signal[];
@@ -16,6 +16,7 @@ type State = {
 
 function SignalItem({ s }: { s: Signal }) {
   const title = s.title?.trim() || "Untitled post";
+  const href = safeHref(s.url);
   return (
     <li className="flex flex-col gap-2 border-t border-border py-4 first:border-t-0 first:pt-0 last:pb-0">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
@@ -34,9 +35,9 @@ function SignalItem({ s }: { s: Signal }) {
         )}
       </div>
       <h3 className="text-sm font-semibold leading-snug">
-        {s.url ? (
+        {href ? (
           <a
-            href={s.url}
+            href={href}
             target="_blank"
             rel="noopener noreferrer"
             className="rounded text-accent underline-offset-4 hover:underline"

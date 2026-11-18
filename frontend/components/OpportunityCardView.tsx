@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useId, useState } from "react";
 import type { OpportunityCard } from "@/lib/types";
-import { ConfidenceMeter, IntentBadge, SourceBadge, Spread } from "./CardMeta";
+import { ConfidenceMeter, IntentBadge, safeHref, SourceBadge, Spread } from "./CardMeta";
 
 function Field({ label, value, open }: { label: string; value: string | null; open: boolean }) {
   return (
@@ -17,6 +17,7 @@ function Field({ label, value, open }: { label: string; value: string | null; op
 export default function OpportunityCardView({ card }: { card: OpportunityCard }) {
   const [open, setOpen] = useState(false);
   const id = useId();
+  const sourceHref = safeHref(card.source_url);
   return (
     <article className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-4" aria-labelledby={id}>
       <header className="flex flex-col gap-2">
@@ -48,9 +49,9 @@ export default function OpportunityCardView({ card }: { card: OpportunityCard })
         >
           {open ? "Show less" : "Show full card"}
         </button>
-        {card.source_url && (
+        {sourceHref && (
           <a
-            href={card.source_url}
+            href={sourceHref}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex min-h-11 items-center rounded px-3 text-sm font-medium text-accent hover:underline"
