@@ -121,6 +121,24 @@ class SupabaseStore:
             return False
         return True
 
+    def last_success_started_at(self, source: str) -> datetime | None:
+        """started_at of the newest ``Success`` ingestion_runs row for ``source`` (IF-75).
+
+        None when there is no such row or the table is absent; other HTTP errors raise.
+        """
+        try:
+            rows = self.select(INGESTION_RUNS_TABLE, {
+                "select": "started_at", "source_platform": f"eq.{source}",
+                "status": "eq.Success", "order": "started_at.desc", "limit": 1,
+            })
+        except HttpError as exc:
+            if exc.status in (404, 400):
+                return None
+            raise
+        if not rows or not rows[0].get("started_at"):
+            return None
+        return datetime.fromisoformat(str(rows[0]["started_at"]).replace("Z", "+00:00"))
+
     # ---- generic helpers for the LLM pipeline (extract / embed) ----
 
     def select(self, table: str, params: Mapping[str, Any]) -> list[dict[str, Any]]:

@@ -75,11 +75,17 @@ line is the shared-budget estimate. Missing Supabase secrets or a failed read pr
 ## Ingest
 
 ```
-python -m scrapers.ingest --source {github,hackernews,reddit,stackexchange} [--limit 50] [--query Q ...] [--since-days 14] [--dry-run]
+python -m scrapers.ingest --source {github,hackernews,reddit,stackexchange} [--limit 50] [--query Q ...] [--since-days D] [--dry-run]
 ```
 
 Needs `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (not for `--dry-run`). Re-runs are safe:
 rows already present for `(source_platform, external_id)` are skipped, never overwritten.
+
+**Look-back window (IF-75).** Without `--since-days`, ingest starts from the `started_at` of
+the newest `Success` row in `ingestion_runs` for that source, minus a 1-hour overlap
+(`SINCE_OVERLAP`), never more than 14 days back. With no such row, in `--dry-run`, or if the
+lookup fails, it uses the 14-day default; an explicit `--since-days` always wins. Each run
+prints `since=<iso> reason=last_success|default|flag`.
 
 ### Default queries — `scrapers/queries.toml` (IF-51)
 

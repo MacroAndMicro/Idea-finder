@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import io
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from scrapers import ingest
 from scrapers.adapters.base import SourceAdapter
-from scrapers.http_client import HttpResponse
+from scrapers.http_client import HttpError, HttpResponse
 from scrapers.models import RawSignal
 from scrapers.store import SupabaseStore
 from scrapers.tests.helpers import ok, status
@@ -265,3 +265,86 @@ def test_record_run_rejection_logs_warning_without_url(make_client, caplog):
         assert store.record_run({"status": "Success"}) is False
     assert "HTTP 400" in caplog.text
     assert "supabase.co" not in caplog.text and SECRET not in caplog.text
+
+
+# ---- IF-75: since window from the last successful run ----
+
+class SinceStore(StubStore):
+    def __init__(self, last=None, error=None):
+        super().__init__()
+        self.last, self.error, self.asked = last, error, []
+
+    def last_success_started_at(self, source):
+        self.asked.append(source)
+        if self.error:
+            raise self.error
+        return self.last
+
+
+class SinceAdapter(StubAdapter):
+    def __init__(self):
+        super().__init__({})
+        self.since = None
+
+    def fetch(self, query, since):
+        self.since = since
+        yield from ()
+
+
+def test_since_uses_last_success_minus_overlap():
+    store, adapter = SinceStore(last=NOW - timedelta(days=1)), SinceAdapter()
+    code, out = run_cli(["--source", "hackernews", "--query", "x"], adapter, store)
+    assert code == 0
+    assert store.asked == ["hackernews"]
+    assert adapter.since == NOW - timedelta(days=1, hours=1)
+    assert f"since={(NOW - timedelta(days=1, hours=1)).isoformat()} reason=last_success" in out
+
+
+def test_since_last_success_is_capped_at_default_days():
+    adapter = SinceAdapter()
+    _, out = run_cli(["--source", "hackernews", "--query", "x"], adapter,
+                     SinceStore(last=NOW - timedelta(days=60)))
+    assert adapter.since == NOW - timedelta(days=ingest.DEFAULT_SINCE_DAYS)
+    assert "reason=last_success" in out
+
+
+def test_since_defaults_without_success_row_or_on_lookup_error():
+    for store in (SinceStore(last=None), SinceStore(error=HttpError(500, "boom"))):
+        adapter = SinceAdapter()
+        _, out = run_cli(["--source", "hackernews", "--query", "x"], adapter, store)
+        assert adapter.since == NOW - timedelta(days=14)
+        assert "reason=default" in out
+
+
+def test_since_default_in_dry_run_without_supabase():
+    adapter = SinceAdapter()
+    out = io.StringIO()
+    ingest.run(["--source", "hackernews", "--query", "x", "--dry-run"],
+               adapter_factory=lambda s: adapter, now=lambda: NOW, out=out)
+    assert adapter.since == NOW - timedelta(days=14)
+    assert "reason=default" in out.getvalue()
+
+
+def test_since_flag_wins_over_last_success():
+    store, adapter = SinceStore(last=NOW - timedelta(days=1)), SinceAdapter()
+    _, out = run_cli(["--source", "hackernews", "--query", "x", "--since-days", "3"],
+                     adapter, store)
+    assert adapter.since == NOW - timedelta(days=3)
+    assert store.asked == []
+    assert "reason=flag" in out
+
+
+def test_store_last_success_started_at(make_client):
+    body = json.dumps([{"started_at": "2026-11-17T06:00:00+00:00"}]).encode()
+    store, transport = make_store(make_client, [ok(body)])
+    assert store.last_success_started_at("github") == datetime(2026, 11, 17, 6, tzinfo=UTC)
+    url = transport.requests[0].url
+    assert "source_platform=eq.github" in url and "status=eq.Success" in url
+    assert "order=started_at.desc" in url
+
+
+def test_store_last_success_none_when_empty_or_table_missing(make_client):
+    store, _ = make_store(make_client, [ok(b"[]")])
+    assert store.last_success_started_at("github") is None
+    store, _ = make_store(make_client, [status(404)])
+    assert store.last_success_started_at("github") is None
