@@ -14,7 +14,12 @@ SOURCE_PLATFORMS = frozenset(
 )
 
 _TAG_RE = re.compile(r"<[^>]+>")
-_WS_RE = re.compile(r"[ \t]+")
+_WS_RE = re.compile(r"[ \t\xa0]+")
+# Line breaks and block-level boundaries become newlines so adjacent blocks
+# (e.g. <li>a</li><li>b</li>) never fuse into one word.
+_BLOCK_RE = re.compile(
+    r"(?i)<\s*(?:br|/?(?:p|div|li|ul|ol|tr|pre|blockquote|table|h[1-6]))\b[^>]*>"
+)
 
 
 def hash_author(platform: str, handle: str | None) -> str | None:
@@ -33,7 +38,7 @@ def html_to_text(value: str | None) -> str | None:
     """Convert API-provided HTML fragments to plain text (not page scraping)."""
     if value is None:
         return None
-    text = re.sub(r"(?i)<\s*(br|/p|p)\s*/?>", "\n", value)
+    text = _BLOCK_RE.sub("\n", value)
     text = html.unescape(_TAG_RE.sub("", text))
     lines = [_WS_RE.sub(" ", line).strip() for line in text.splitlines()]
     return "\n".join(line for line in lines if line) or None
