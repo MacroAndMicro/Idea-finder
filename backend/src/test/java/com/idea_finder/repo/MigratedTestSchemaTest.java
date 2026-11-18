@@ -17,11 +17,11 @@ class MigratedTestSchemaTest {
 	JdbcTemplate jdbc;
 
 	@Test
-	void replayYieldsTheSameElevenTablesAsProd() {
+	void replayYieldsTheSameTwelveTablesAsProd() {
 		List<String> tables = jdbc.queryForList(
 			"select tablename from pg_tables where schemaname = 'if_test' order by tablename", String.class);
 		assertThat(tables).containsExactly("agent_inbox", "agent_run_reports", "card_signals", "ingestion_runs",
-			"opportunity_cards", "project_board", "raw_signals", "signal_extractions", "system_prompts",
+			"opportunity_cards", "project_board", "raw_signals", "signal_extractions", "synthesis_rejections", "system_prompts",
 			"system_prompts_history", "test_personas");
 	}
 

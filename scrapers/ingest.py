@@ -3,6 +3,9 @@
     python -m scrapers.ingest --source {github,hackernews,reddit,stackexchange}
         [--limit N] [--query Q ...] [--since-days D] [--dry-run]
 
+Default queries (and Stack Exchange sites / Reddit subreddits) come from the reviewed
+file ``scrapers/queries.toml`` (IF-51); ``--query`` overrides the queries, and
+STACKEXCHANGE_SITES / REDDIT_SUBREDDITS override the site lists.
 Prints fetched / inserted / skipped counts. Never prints secrets.
 Reddit needs REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET / REDDIT_USER_AGENT; without them
 the run exits 2 naming the missing variable and writes nothing.
@@ -14,9 +17,13 @@ import argparse
 import itertools
 import logging
 import sys
-from collections.abc import Callable, Iterator, Sequence
+import tomllib
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
+from scrapers import config
 from scrapers.adapters.base import SourceAdapter
 from scrapers.adapters.github import GitHubIssuesAdapter
 from scrapers.adapters.hackernews import HackerNewsAdapter
@@ -37,13 +44,66 @@ ADAPTERS: dict[str, Callable[[], SourceAdapter]] = {
 }
 REQUIRED_KEY = {"github": "GITHUB_TOKEN", "stackexchange": "STACKEXCHANGE_KEY"}
 
-# Pain-point phrasing that tends to surface B2B / developer friction.
-DEFAULT_QUERIES: dict[str, tuple[str, ...]] = {
-    "hackernews": ("workaround", "is there a tool", "spreadsheet"),
-    "github": ("workaround", "feature request integration"),
-    "stackexchange": ("workaround", "export"),
-    "reddit": ("workaround", "is there a tool", "spreadsheet"),
+QUERIES_FILE = Path(__file__).with_name("queries.toml")
+#: Optional list keys per source in queries.toml → (adapter kwarg, overriding env var).
+SOURCE_LISTS: dict[str, dict[str, tuple[str, str]]] = {
+    "stackexchange": {"sites": ("sites", "STACKEXCHANGE_SITES")},
+    "reddit": {"subreddits": ("subreddits", "REDDIT_SUBREDDITS")},
 }
+
+
+class QueryConfigError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class SourceQueries:
+    queries: tuple[str, ...]
+    lists: Mapping[str, tuple[str, ...]]
+
+
+def _str_list(source: str, key: str, value: object) -> tuple[str, ...]:
+    if (not isinstance(value, list) or not value
+            or not all(isinstance(v, str) and v.strip() for v in value)):
+        raise QueryConfigError(f"[{source}] {key} must be a non-empty list of strings")
+    return tuple(v.strip() for v in value)
+
+
+def load_queries(path: Path = QUERIES_FILE) -> dict[str, SourceQueries]:
+    """Parse queries.toml; every ingest source needs an entry and no other source may appear."""
+    with path.open("rb") as fh:
+        data = tomllib.load(fh)
+    unknown = sorted(set(data) - set(ADAPTERS))
+    missing = sorted(set(ADAPTERS) - set(data))
+    if unknown or missing:
+        raise QueryConfigError(f"queries file: unknown sources {unknown}, missing {missing}")
+    out: dict[str, SourceQueries] = {}
+    for source, table in data.items():
+        if not isinstance(table, dict):
+            raise QueryConfigError(f"[{source}] must be a table")
+        allowed = {"queries", *SOURCE_LISTS.get(source, {})}
+        extra = sorted(set(table) - allowed)
+        if extra:
+            raise QueryConfigError(f"[{source}] unknown keys {extra}")
+        lists = {k: _str_list(source, k, table[k]) for k in table if k != "queries"}
+        out[source] = SourceQueries(_str_list(source, "queries", table.get("queries")), lists)
+    return out
+
+
+QUERY_CONFIG = load_queries()
+#: Pain-point phrasing that tends to surface B2B / developer friction (from queries.toml).
+DEFAULT_QUERIES: dict[str, tuple[str, ...]] = {s: c.queries for s, c in QUERY_CONFIG.items()}
+
+
+def adapter_kwargs(source: str, cfg: Mapping[str, SourceQueries] = QUERY_CONFIG
+                   ) -> dict[str, list[str]]:
+    """Site / subreddit lists from queries.toml, unless their env var overrides them."""
+    kwargs: dict[str, list[str]] = {}
+    for key, (kwarg, env) in SOURCE_LISTS.get(source, {}).items():
+        values = cfg[source].lists.get(key)
+        if values and config.get_env(env) is None:
+            kwargs[kwarg] = list(values)
+    return kwargs
 #: ingestion_runs.status values (CHECK constraint, IF-23 migration).
 RUN_STATUS = {"success": "Success", "partial": "Partial", "failed": "Failed"}
 DEFAULT_LIMIT = 50
@@ -99,7 +159,7 @@ def run(argv: Sequence[str] | None = None, *,
     since = started - timedelta(days=args.since_days)
     queries = args.queries or DEFAULT_QUERIES[args.source]
     try:
-        adapter = (adapter_factory or (lambda s: ADAPTERS[s]()))(args.source)
+        adapter = (adapter_factory or (lambda s: ADAPTERS[s](**adapter_kwargs(s))))(args.source)
         store = None if args.dry_run else store_factory()
     except MissingSecretError as exc:
         print(f"error: {exc}", file=out)

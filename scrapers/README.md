@@ -11,14 +11,16 @@ scrapers/
                      X-RateLimit-* waits, gzip, honest User-Agent (SCRAPER_USER_AGENT)
   adapters/          SourceAdapter base + hackernews, github, stackexchange, reddit
   store.py           SupabaseStore: idempotent insert into raw_signals (+ ingestion_runs if present)
+  prioritize.py      deterministic ranking + skip rule for which signals extract spends LLM requests on
   cluster.py         pure clustering of pain-point signals + 1–100 confidence score
-  ingest.py          CLI: python -m scrapers.ingest --source {hackernews,github,stackexchange}
+  ingest.py          CLI: python -m scrapers.ingest --source {hackernews,github,stackexchange,reddit}
+  queries.toml       reviewed default queries / sites / subreddits per source
   embed.py           CLI: python -m scrapers.embed — 1536-d embeddings on raw_signals
   extract.py         CLI: python -m scrapers.extract — per-signal LLM extraction → signal_extractions
   synthesize.py      CLI: python -m scrapers.synthesize — clusters → opportunity_cards + card_signals
   pipeline.py        CLI: python -m scrapers.pipeline — ingest → extract → embed → synthesize
   llm/               provider-agnostic LLMClient / EmbeddingClient: base, factory, fake, gemini
-  llm/prompts/       versioned prompts (extract_signal_v1, synthesize_card_v1); never edited after shipping
+  llm/prompts/       versioned prompts (extract_signal_v1, extract_signal_batch_v1, synthesize_card_v1); never edited after shipping
   llm/extraction_schema.py  strict JSON validation of extraction output
   llm/card_schema.py        strict JSON validation of card-synthesis output
   tests/             pytest suite (test_*.py, conftest.py, helpers.py)
@@ -36,12 +38,22 @@ Env vars: `GITHUB_TOKEN`, `STACKEXCHANGE_KEY`, `SCRAPER_USER_AGENT` (optional),
 
 ```
 python -m scrapers.pipeline [--sources hackernews,github,stackexchange,reddit]
-    [--extract-limit 18] [--synthesize-limit 2] [--skip-synthesize] [--dry-run]
+    [--extract-limit 112] [--extract-batch-size 8] [--extract-max-requests 18]
+    [--synthesize-limit 2] [--skip-synthesize] [--dry-run]
 ```
 
 Runs `ingest` per source, then `extract` (capped), `embed`, `synthesize` (capped), reusing
 each module's `run()`. Defaults fit the Gemini free tier (20 generate requests/day):
-18 extractions + 2 card writes. Embed runs after extract because it embeds only signals
+
+| Stage | Requests/day | Signals |
+|---|---|---|
+| extract batches (8 signals each) | 14 | 112 |
+| extract single-signal retries (missing/invalid batch items) | ≤ 4 | — |
+| synthesize card writes | 2 | — |
+| **Total** | **≤ 20** | up to 112 classified/day (was 18) |
+
+`--extract-max-requests 18` is a hard cap, so retries can never eat the synthesize budget;
+signals not reached wait for the next run. Embed runs after extract because it embeds only signals
 already classified as B2B pain. Sources with missing secrets (e.g. `REDDIT_*`) are skipped
 with a note; a failing source or stage is reported and the rest still run. Prints one
 `stage=… status=…` line per stage plus a `pipeline status=…` total; exit 0 only if no
@@ -56,6 +68,16 @@ python -m scrapers.ingest --source {github,hackernews,reddit,stackexchange} [--l
 Needs `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (not for `--dry-run`). Re-runs are safe:
 rows already present for `(source_platform, external_id)` are skipped, never overwritten.
 
+### Default queries — `scrapers/queries.toml` (IF-51)
+
+Without `--query`, ingest uses the per-source queries in `scrapers/queries.toml` (read with
+stdlib `tomllib`). Each entry has a one-line comment naming the B2B pain it targets, so a
+merge request that changes the file is the review record. The file can also hold
+`[stackexchange] sites` and `[reddit] subreddits`; `STACKEXCHANGE_SITES` /
+`REDDIT_SUBREDDITS` still override them. A test fails if an `ingest.ADAPTERS` source has no
+entry, if an unknown source (e.g. `g2`) appears, or if an entry lacks its comment. Keep
+it short: every query costs API requests (adapters keep their rate limits and page caps).
+
 ### Reddit
 
 Official OAuth API only, app-only client credentials: token from
@@ -67,26 +89,52 @@ writes nothing. Honors `X-Ratelimit-Remaining` / `X-Ratelimit-Reset` (seconds un
 and spaces requests 1 s apart. Submissions only (subreddit search, newest first, stops at
 `--since-days`); NSFW, promoted and stickied posts are skipped. Comments are not fetched yet.
 
-Default subreddits (B2B / developer workflow pain; override with `REDDIT_SUBREDDITS`,
-comma-separated): `sysadmin`, `devops`, `SaaS`, `dataengineering`, `ExperiencedDevs`,
+Default subreddits (B2B / developer workflow pain; listed in `queries.toml`, override
+with `REDDIT_SUBREDDITS`, comma-separated): `sysadmin`, `devops`, `SaaS`, `dataengineering`, `ExperiencedDevs`,
 `msp`, `salesforce`, `analytics`.
 
 ## Extract (per-signal LLM)
 
 ```
-python -m scrapers.extract [--limit 25] [--dry-run]
+python -m scrapers.extract [--limit 40] [--batch-size 8] [--max-requests N] [--dry-run]
 ```
 
-Takes `raw_signals` with `processed_at` null (oldest first), runs prompt
-`extract_signal_v1` through the `LLM_*`-selected client, validates the JSON
-(`llm/extraction_schema.py`) and upserts `signal_extractions` with `llm_provider`,
-`llm_model`, `prompt_version`, then sets `processed_at`.
-- Invalid output is retried once; still invalid → stored as a failed row
-  (`is_pain_point`/`is_b2b` null, never clustered) and marked processed.
-- Provider/network errors leave the signal unprocessed; 3 in a row stop the run.
-- Post text is untrusted: fenced in `<signal>` tags, delimiter look-alikes neutralised,
-  title/body truncated (300/6000 chars); the system prompt forbids following it and
+Takes `raw_signals` with `processed_at` null, ranked best-first by `prioritize.py` (see
+below), and sends the top `--limit` in batches of
+`--batch-size` (default 8, max 15) with prompt `extract_signal_batch_v1` through the
+`LLM_*`-selected client: one request classifies the whole batch (IF-49). The model returns
+a JSON array keyed by signal `id`; every item is validated on its own
+(`llm/extraction_schema.py`) and upserted into `signal_extractions` with `llm_provider`,
+`llm_model` and the `prompt_version` that produced it, then `processed_at` is set.
+- Unknown / duplicate ids in the reply are ignored. A missing or invalid item is retried
+  once **alone** with `extract_signal_v1`; still invalid → stored as a failed row
+  (`is_pain_point`/`is_b2b` null, never clustered) and marked processed. Valid items of
+  the same batch are always saved.
+- `--batch-size 1` = the original per-signal mode (`extract_signal_v1`, one retry).
+- `--max-requests` caps LLM requests per run; signals not reached stay unprocessed.
+- Per-signal text in a batch is truncated to 300/3000 chars (title/body).
+- Provider/network errors leave the signal(s) unprocessed; 3 in a row stop the run. A
+  quota-exhausted response stops the run at once (results already validated are kept).
+- Post text is untrusted: each post fenced in its own `<signal id="…">` tag, any
+  `<signal…>`/`</signal>` look-alike in the text neutralised, title/body truncated; the system prompt forbids following it and
   forbids inventing facts (null / `Unspecified` when absent).
+
+### Which signals get the LLM budget (`prioritize.py`, IF-50)
+
+Cheap, deterministic, no LLM, no new dependencies. Nothing is ever deleted from `raw_signals`.
+
+- **Skip rule:** stripped `title` + `body` shorter than `MIN_TEXT_CHARS` (40) → marked
+  processed (`processed_at` set) with **no** `signal_extractions` row, so it never uses a
+  request. "Processed without an extraction row" = skipped by the pre-filter. The count is
+  printed as `skipped=` in the extract summary (dry-run marks nothing).
+- **Priority score** (higher first, ties by lower id):
+
+| Term | Formula |
+|---|---|
+| Engagement | `2.0 × log10(1 + score + 2 × comments)` (negatives → 0) |
+| Body length | `2.0 × min(1, len(body) / 1500)` |
+| Pain phrases | `1.5 ×` distinct hits in title/body (`workaround`, `broken`, `how do i`, `is there a tool`, `manually`, `we pay`, …), max 4 |
+| B2B terms | `1.0 ×` distinct word/tag hits (`team`, `production`, `api`, `integration`, `invoice`, `devops`, …), max 3 |
 
 ## Embed (raw_signals)
 
@@ -142,4 +190,11 @@ per run (free-tier quotas) and the rest wait for the next run. `--dry-run` = no 
   card is that card — new signals are linked and counts/confidence/frequency refreshed,
   with no LLM call. A new card whose text embedding has cosine >= **0.90**
   (`CARD_DUPLICATE_THRESHOLD`) with an existing card is merged into it instead.
+- Rejections are remembered (IF-48): a cluster answered `valid_opportunity: false` or with
+  invalid output is stored in `synthesis_rejections` by fingerprint
+  (`sha256(prompt_version + sorted signal ids)`) and skipped with no LLM call
+  (`skipped_rejected=` in the summary) until its signal set or the prompt version changes.
+- A new card and its `card_signals` links are written in one transaction through the SQL
+  function `insert_card_with_links(card jsonb, signal_ids bigint[])` (PostgREST RPC,
+  service_role only), so a failed link can never leave a card without evidence.
 - A quota-exhausted provider response stops the run at once.

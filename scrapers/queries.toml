@@ -1,0 +1,54 @@
+# Default ingestion queries per source (IF-51), read by scrapers.ingest when no --query
+# is given. Every entry carries a one-line comment naming the B2B / developer pain it
+# targets; a pull request that changes this file is the review record for "why".
+# Rules: official APIs only, Phase 1 sources only (no G2/Capterra), keep the list short —
+# each query costs API requests (adapters honour rate limits and pagination caps).
+#
+# Optional per-source lists (used only when the matching env var is unset):
+#   [stackexchange] sites       ← STACKEXCHANGE_SITES overrides
+#   [reddit]        subreddits  ← REDDIT_SUBREDDITS overrides
+
+[hackernews]
+queries = [
+  "workaround",        # engineers describing hacks around broken or missing tooling
+  "is there a tool",   # explicit search for a product that does not exist yet
+  "spreadsheet",       # business processes still run in spreadsheets (duct tape)
+  "we pay for",        # new: willingness-to-pay / current spend on an inadequate tool
+]
+
+[github]
+queries = [
+  "workaround",                    # issue threads where users share hacks for a bug or gap
+  "feature request integration",   # broken or missing integrations between tools teams use
+  "export",                        # new: data export friction (lock-in, manual CSV pulls)
+]
+
+[stackexchange]
+queries = [
+  "workaround",   # recurring "how do I get around X" questions about tools
+  "export",       # data export / migration pain between business systems
+  "automate",     # new: manual work people want to script away
+]
+sites = [
+  "stackoverflow",   # developer tooling friction
+  "serverfault",     # ops / sysadmin friction
+  "superuser",       # power-user / IT workflow friction
+]
+
+[reddit]
+queries = [
+  "workaround",        # practitioners sharing hacks for broken or missing tooling
+  "is there a tool",   # explicit search for a product that does not exist yet
+  "spreadsheet",       # business processes still run in spreadsheets (duct tape)
+  "manual process",    # new: operational toil teams want to get rid of
+]
+subreddits = [
+  "sysadmin",          # IT operations pain
+  "devops",            # CI/CD, infra and on-call pain
+  "SaaS",              # SaaS founders' operational and tooling pain
+  "dataengineering",   # data pipeline and integration pain
+  "ExperiencedDevs",   # senior engineers' workflow and tooling pain
+  "msp",               # managed-service providers: multi-client ops pain
+  "salesforce",        # CRM admin and integration pain
+  "analytics",         # reporting / BI duct tape
+]

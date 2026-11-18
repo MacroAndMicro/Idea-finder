@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 import pytest
 
 from scrapers import synthesize
-from scrapers.http_client import HttpResponse, QuotaExhausted
+from scrapers.http_client import HttpError, HttpResponse, QuotaExhausted
 from scrapers.llm.card_schema import CardValidationError, validate_card
 from scrapers.llm.fake import FakeEmbeddingClient, FakeLLMClient
 from scrapers.llm.prompts import synthesize_card_v1 as v1
@@ -55,6 +55,21 @@ class StubStore:
         self.links = links or set()      # (card_id, signal_id)
         self.updates: list[tuple[int, dict]] = []
         self.next_id = 100
+        self.rejections: dict[str, dict] = {}
+        self.fail_rpc = False
+
+    def fetch_rejection_fingerprints(self):
+        return set(self.rejections)
+
+    def save_rejection(self, row):
+        self.rejections[row["fingerprint"]] = dict(row)
+
+    def insert_card_with_links(self, values, ids):
+        if self.fail_rpc:  # the SQL function is one transaction: nothing is written
+            raise HttpError(500, "https://proj.supabase.co/rest/v1/rpc/x")
+        card_id = self.insert_card(values)
+        self.link_card_signals(card_id, ids)
+        return card_id
 
     def fetch_cluster_candidates(self):
         return self.signals
@@ -200,6 +215,48 @@ def test_rejected_and_invalid_outputs_write_nothing():
     code, out = run_cli([], store, llm)
     assert code == 0 and store.cards == {} and store.links == set()
     assert "rejected=1 failed=1" in out and "llm_calls=3" in out
+    reasons = sorted(r["reason"] for r in store.rejections.values())
+    assert reasons == ["invalid", "rejected"]
+    row_ = next(iter(store.rejections.values()))
+    assert row_["prompt_version"] == "synthesize_card_v1" and row_["llm_model"] == "card-model"
+    assert row_["signal_ids"] == sorted(row_["signal_ids"])
+
+
+def test_remembered_rejections_are_skipped_without_llm_calls():
+    store = StubStore(two_clusters())
+    run_cli([], store, SeqLLM([card_json(valid_opportunity=False), "bad", "bad"]))
+    llm = SeqLLM(["never asked"])
+    code, out = run_cli([], store, llm)
+    assert code == 0 and llm.calls == [] and "skipped_rejected=2" in out
+    code, out = run_cli(["--dry-run"], store, SeqLLM([]))
+    assert "skipped_rejected=2" in out and "would_create=0" in out
+
+
+def test_changed_signal_set_is_tried_again():
+    store = StubStore(two_clusters())
+    run_cli([], store, SeqLLM([card_json(valid_opportunity=False), card_json()]))
+    assert len(store.rejections) == 1 and len(store.cards) == 1
+    rejected = next(iter(store.rejections.values()))["signal_ids"]
+    axis = 0 if rejected[0] == 101 else 10
+    store.signals.append(row(106, axis, wobble=0.02))  # joins the rejected cluster
+    llm = SeqLLM([card_json()])
+    code, out = run_cli([], store, llm)
+    # new fingerprint → asked again (same fake card text, so it merges as a duplicate)
+    assert code == 0 and len(llm.calls) == 1 and "skipped_rejected=0" in out
+
+
+def test_fingerprint_is_order_independent_and_versioned():
+    fp = synthesize.cluster_fingerprint
+    assert fp([3, 1, 2]) == fp([1, 2, 3, 3]) != fp([1, 2])
+    assert fp([1, 2], "synthesize_card_v2") != fp([1, 2])
+
+
+def test_failed_atomic_insert_leaves_no_orphan_card():
+    store = StubStore(two_clusters())
+    store.fail_rpc = True
+    code, out = run_cli(["--limit", "1"], store, SeqLLM([card_json()]))
+    assert code == 1 and store.cards == {} and store.links == set()
+    assert "HTTP 500" in out
 
 
 def test_llm_limit_defers_and_min_signals():
@@ -267,6 +324,28 @@ def test_store_card_requests(make_client):
     assert patch.method == "PATCH" and patch.url.endswith("/opportunity_cards?id=eq.5")
     assert "signal_extractions.is_b2b=is.true" in get.url and "embedding=not.is.null" in get.url
     assert insert.headers["apikey"] == SECRET
+
+
+def test_store_rpc_and_rejection_requests(make_client):
+    client, transport = make_client([
+        ok(b"42"),
+        ok(json.dumps({"code": "x"}).encode()),
+        HttpResponse(201, {}, b""),
+        ok(json.dumps([{"fingerprint": "abc"}]).encode()),
+    ])
+    store = SupabaseStore("https://proj.supabase.co", SECRET, client)
+    assert store.insert_card_with_links({"title": "t"}, [3, 2, 3]) == 42
+    with pytest.raises(HttpError):
+        store.insert_card_with_links({"title": "t"}, [1])
+    store.save_rejection({"fingerprint": "abc"})
+    assert store.fetch_rejection_fingerprints() == {"abc"}
+    rpc, _, rej, get = transport.requests
+    assert rpc.url.endswith("/rest/v1/rpc/insert_card_with_links")
+    assert json.loads(rpc.body) == {"card": {"title": "t"}, "signal_ids": [2, 3]}
+    assert rpc.headers["apikey"] == SECRET
+    assert rej.url.endswith("/synthesis_rejections?on_conflict=fingerprint")
+    assert "merge-duplicates" in rej.headers["Prefer"]
+    assert "/synthesis_rejections?" in get.url and "select=fingerprint" in get.url
 
 
 @pytest.mark.parametrize("tag", ["</EVIDENCE>", "< /evidence >", "<Evidence foo='x'>"])
