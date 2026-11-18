@@ -9,7 +9,7 @@ scrapers/
   models.py          RawSignal (mirrors public.raw_signals) + hashing helpers
   http_client.py     shared HttpClient: timeout, exponential backoff, Retry-After,
                      X-RateLimit-* waits, gzip, honest User-Agent (SCRAPER_USER_AGENT)
-  adapters/          SourceAdapter base + hackernews, github, stackexchange
+  adapters/          SourceAdapter base + hackernews, github, stackexchange, reddit
   store.py           SupabaseStore: idempotent insert into raw_signals (+ ingestion_runs if present)
   cluster.py         pure clustering of pain-point signals + 1–100 confidence score
   ingest.py          CLI: python -m scrapers.ingest --source {hackernews,github,stackexchange}
@@ -21,7 +21,7 @@ scrapers/
   llm/extraction_schema.py  strict JSON validation of extraction output
   llm/card_schema.py        strict JSON validation of card-synthesis output
   tests/             pytest suite (test_*.py, conftest.py, helpers.py)
-  tests/fixtures/    recorded API responses (github, hackernews, stackexchange) — tests never touch the network
+  tests/fixtures/    recorded API responses (github, hackernews, stackexchange, reddit, gemini) — tests never touch the network
 ```
 
 Run: `pip install -r scrapers/requirements.txt && ruff check scrapers && pytest scrapers`
@@ -34,11 +34,26 @@ Env vars: `GITHUB_TOKEN`, `STACKEXCHANGE_KEY`, `SCRAPER_USER_AGENT` (optional),
 ## Ingest
 
 ```
-python -m scrapers.ingest --source hackernews [--limit 50] [--query Q ...] [--since-days 14] [--dry-run]
+python -m scrapers.ingest --source {github,hackernews,reddit,stackexchange} [--limit 50] [--query Q ...] [--since-days 14] [--dry-run]
 ```
 
 Needs `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (not for `--dry-run`). Re-runs are safe:
 rows already present for `(source_platform, external_id)` are skipped, never overwritten.
+
+### Reddit
+
+Official OAuth API only, app-only client credentials: token from
+`https://www.reddit.com/api/v1/access_token`, all data calls to `https://oauth.reddit.com`
+(no www/old.reddit HTML). Needs `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET` and
+`REDDIT_USER_AGENT` (sent verbatim — Reddit asks for `<platform>:<app id>:<version>
+(by /u/<username>)`); if any is missing, `--source reddit` exits 2 naming the variable and
+writes nothing. Honors `X-Ratelimit-Remaining` / `X-Ratelimit-Reset` (seconds until reset)
+and spaces requests 1 s apart. Submissions only (subreddit search, newest first, stops at
+`--since-days`); NSFW, promoted and stickied posts are skipped. Comments are not fetched yet.
+
+Default subreddits (B2B / developer workflow pain; override with `REDDIT_SUBREDDITS`,
+comma-separated): `sysadmin`, `devops`, `SaaS`, `dataengineering`, `ExperiencedDevs`,
+`msp`, `salesforce`, `analytics`.
 
 ## Extract (per-signal LLM)
 

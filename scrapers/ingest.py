@@ -1,10 +1,11 @@
 """Ingest CLI: fetch signals from one Phase 1 source and store them in raw_signals.
 
-    python -m scrapers.ingest --source {hackernews,github,stackexchange}
+    python -m scrapers.ingest --source {github,hackernews,reddit,stackexchange}
         [--limit N] [--query Q ...] [--since-days D] [--dry-run]
 
 Prints fetched / inserted / skipped counts. Never prints secrets.
-Reddit is intentionally absent until API access is approved.
+Reddit needs REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET / REDDIT_USER_AGENT; without them
+the run exits 2 naming the missing variable and writes nothing.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 from scrapers.adapters.base import SourceAdapter
 from scrapers.adapters.github import GitHubIssuesAdapter
 from scrapers.adapters.hackernews import HackerNewsAdapter
+from scrapers.adapters.reddit import RedditAdapter
 from scrapers.adapters.stackexchange import StackExchangeAdapter
 from scrapers.config import MissingSecretError
 from scrapers.http_client import HttpError, RateLimitExceeded
@@ -31,6 +33,7 @@ ADAPTERS: dict[str, Callable[[], SourceAdapter]] = {
     "hackernews": HackerNewsAdapter,
     "github": GitHubIssuesAdapter.from_env,
     "stackexchange": StackExchangeAdapter.from_env,
+    "reddit": RedditAdapter.from_env,
 }
 REQUIRED_KEY = {"github": "GITHUB_TOKEN", "stackexchange": "STACKEXCHANGE_KEY"}
 
@@ -39,6 +42,7 @@ DEFAULT_QUERIES: dict[str, tuple[str, ...]] = {
     "hackernews": ("workaround", "is there a tool", "spreadsheet"),
     "github": ("workaround", "feature request integration"),
     "stackexchange": ("workaround", "export"),
+    "reddit": ("workaround", "is there a tool", "spreadsheet"),
 }
 #: ingestion_runs.status values (CHECK constraint, IF-23 migration).
 RUN_STATUS = {"success": "Success", "partial": "Partial", "failed": "Failed"}
@@ -94,9 +98,8 @@ def run(argv: Sequence[str] | None = None, *,
     started = now()
     since = started - timedelta(days=args.since_days)
     queries = args.queries or DEFAULT_QUERIES[args.source]
-    adapter = (adapter_factory or (lambda s: ADAPTERS[s]()))(args.source)
-
     try:
+        adapter = (adapter_factory or (lambda s: ADAPTERS[s]()))(args.source)
         store = None if args.dry_run else store_factory()
     except MissingSecretError as exc:
         print(f"error: {exc}", file=out)

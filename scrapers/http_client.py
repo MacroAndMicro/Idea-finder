@@ -28,6 +28,8 @@ from scrapers import config
 log = logging.getLogger(__name__)
 
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+#: X-RateLimit-Reset values above this are epoch seconds, below it a delay in seconds.
+EPOCH_CUTOFF = 1_000_000_000
 
 
 @dataclass(frozen=True)
@@ -151,12 +153,26 @@ class HttpClient:
                 return max(0.0, float(retry_after))
             except ValueError:
                 return None
-        if resp.header("X-RateLimit-Remaining") == "0" and resp.header("X-RateLimit-Reset"):
+        if self._limit_exhausted(resp):
             try:
-                return max(0.0, float(resp.header("X-RateLimit-Reset") or 0) - self._clock()) + 1
+                reset = float(resp.header("X-RateLimit-Reset") or 0)
             except ValueError:
                 return None
+            # GitHub sends an epoch timestamp; Reddit sends seconds until reset.
+            wait = reset - self._clock() if reset > EPOCH_CUTOFF else reset
+            return max(0.0, wait) + 1
         return None
+
+    @staticmethod
+    def _limit_exhausted(resp: HttpResponse) -> bool:
+        """X-RateLimit-Remaining below one request (GitHub "0", Reddit "0.0")."""
+        remaining = resp.header("X-RateLimit-Remaining")
+        if remaining is None or not resp.header("X-RateLimit-Reset"):
+            return False
+        try:
+            return float(remaining) < 1
+        except ValueError:
+            return False
 
     def get(
         self,
@@ -175,6 +191,14 @@ class HttpClient:
     ) -> HttpResponse:
         merged = {**self._headers, "Content-Type": "application/json", **(headers or {})}
         return self.send(HttpRequest("POST", url, merged, json.dumps(payload).encode()))
+
+    def post_form(
+        self, url: str, fields: Mapping[str, str], headers: Mapping[str, str] | None = None
+    ) -> HttpResponse:
+        merged = {**self._headers, "Content-Type": "application/x-www-form-urlencoded",
+                  **(headers or {})}
+        body = urllib.parse.urlencode(dict(fields)).encode()
+        return self.send(HttpRequest("POST", url, merged, body))
 
     def patch_json(
         self, url: str, payload: Any, headers: Mapping[str, str] | None = None
@@ -203,7 +227,7 @@ class HttpClient:
             )
             if 200 <= resp.status < 300:
                 # Primary rate limit exhausted: wait for the reset before the next call.
-                if server_wait is not None and resp.header("X-RateLimit-Remaining") == "0":
+                if server_wait is not None and self._limit_exhausted(resp):
                     self.defer(server_wait)
                 return resp
             if not throttled:
