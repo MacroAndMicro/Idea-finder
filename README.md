@@ -49,6 +49,7 @@ overridden with environment variables:
 | `DB_IDLE_TIMEOUT_MS` | `300000` | Idle connection retirement |
 | `DB_MAX_LIFETIME_MS` | `900000` | Max connection lifetime |
 | `SHUTDOWN_TIMEOUT` | `20s` | Graceful-shutdown grace period |
+| `HEALTH_DB_TIMEOUT_SECONDS` | `2` | Query timeout of the `select 1` behind `GET /api/health` (200 `db:up` / 503 `db:down`) |
 
 ## Workflow
 

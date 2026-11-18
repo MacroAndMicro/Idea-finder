@@ -43,6 +43,9 @@ logging:
     level: "%5p [%X{requestId:-}]"
 
 app:
+  health:
+    # IF-66: query timeout of the select 1 behind GET /api/health.
+    db-timeout-seconds: ${HEALTH_DB_TIMEOUT_SECONDS:2}
   cors:
     # Comma-separated list of origins allowed to call the API (the Next.js frontend).
     allowed-origins: ${FRONTEND_ORIGIN:http://localhost:3000}
