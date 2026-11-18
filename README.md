@@ -36,6 +36,20 @@ pip install -r scrapers/requirements.txt && ruff check scrapers && pytest scrape
 Secrets and settings come only from environment variables. Copy `.env.example` to `.env`
 and fill it in; the file lists every variable by name. Never commit `.env` or any value.
 
+The backend's `DATABASE_URL` points at the Supabase **transaction pooler** (port 6543). The
+defaults in `backend/src/main/resources/application.yaml` are tuned for it and can be
+overridden with environment variables:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DB_PREPARE_THRESHOLD` | `0` | JDBC `prepareThreshold`; keep `0` behind the pooler (server-side prepared statements break) |
+| `DB_POOL_MAX_SIZE` | `5` | Hikari maximum pool size |
+| `DB_POOL_MIN_IDLE` | `1` | Hikari minimum idle connections |
+| `DB_CONNECTION_TIMEOUT_MS` | `10000` | Max wait for a pooled connection |
+| `DB_IDLE_TIMEOUT_MS` | `300000` | Idle connection retirement |
+| `DB_MAX_LIFETIME_MS` | `900000` | Max connection lifetime |
+| `SHUTDOWN_TIMEOUT` | `20s` | Graceful-shutdown grace period |
+
 ## Workflow
 
 - Tickets live on the Supabase `project_board` table (keys like `IF-42`).

@@ -9,6 +9,17 @@ spring:
     url: ${DATABASE_URL}
     username: ${DATABASE_USER}
     password: ${DATABASE_PASSWORD}
+    # IF-52: safe for the Supabase transaction pooler (port 6543, PgBouncer/Supavisor transaction mode).
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:5}
+      minimum-idle: ${DB_POOL_MIN_IDLE:1}
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:10000}
+      idle-timeout: ${DB_IDLE_TIMEOUT_MS:300000}
+      max-lifetime: ${DB_MAX_LIFETIME_MS:900000}
+      data-source-properties:
+        # 0 = never use server-side prepared statements; they break under transaction pooling
+        # ("prepared statement S_1 already exists").
+        prepareThreshold: ${DB_PREPARE_THRESHOLD:0}
   # Schema is owned by supabase/migrations/, not Flyway or Hibernate.
   flyway:
     enabled: false
@@ -16,6 +27,17 @@ spring:
     hibernate:
       ddl-auto: none
     open-in-view: false
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:20s}
+
+server:
+  # IF-52: finish in-flight requests on SIGTERM; never leak internals in /error responses.
+  shutdown: graceful
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    include-exception: false
 
 app:
   cors:
