@@ -22,6 +22,11 @@ queries = [
   "feature request integration",   # broken or missing integrations between tools teams use
   "export",                        # new: data export friction (lock-in, manual CSV pulls)
 ]
+# GitHub Discussions (GraphQL search, IF-74): Q&A / ideas threads that issues miss.
+discussions = [
+  "workaround",                    # users sharing hacks for a gap in a tool they depend on
+  "is there a way",                # unmet need phrased as a question in Q&A categories
+]
 
 [stackexchange]
 queries = [

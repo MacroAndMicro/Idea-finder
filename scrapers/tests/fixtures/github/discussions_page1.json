@@ -1,0 +1,30 @@
+{
+  "data": {
+    "search": {
+      "pageInfo": {"hasNextPage": true, "endCursor": "Y3Vyc29yOjI="},
+      "nodes": [
+        {
+          "number": 88,
+          "title": "Is there a way to export audit logs to S3 on a schedule?",
+          "body": "We currently run a <b>cron script</b> that pulls the audit API and uploads a CSV every night. It breaks whenever the token rotates.",
+          "url": "https://github.com/example-org/example-tool/discussions/88",
+          "createdAt": "2026-11-09T12:30:00Z",
+          "upvoteCount": 17,
+          "comments": {"totalCount": 6},
+          "author": {"login": "example-user"},
+          "repository": {"nameWithOwner": "example-org/example-tool"},
+          "category": {"name": "Q&A"}
+        },
+        {},
+        {
+          "number": 91,
+          "title": "Missing repository should be skipped",
+          "body": "x",
+          "url": "https://github.com/example-org/example-tool/discussions/91",
+          "createdAt": "2026-11-10T09:00:00Z",
+          "repository": null
+        }
+      ]
+    }
+  }
+}

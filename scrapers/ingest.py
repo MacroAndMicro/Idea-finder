@@ -25,7 +25,7 @@ from pathlib import Path
 
 from scrapers import config
 from scrapers.adapters.base import SourceAdapter
-from scrapers.adapters.github import GitHubIssuesAdapter
+from scrapers.adapters.github import GitHubAdapter
 from scrapers.adapters.hackernews import HackerNewsAdapter
 from scrapers.adapters.reddit import RedditAdapter
 from scrapers.adapters.stackexchange import StackExchangeAdapter
@@ -38,7 +38,7 @@ log = logging.getLogger("scrapers.ingest")
 
 ADAPTERS: dict[str, Callable[[], SourceAdapter]] = {
     "hackernews": HackerNewsAdapter,
-    "github": GitHubIssuesAdapter.from_env,
+    "github": GitHubAdapter.from_env,
     "stackexchange": StackExchangeAdapter.from_env,
     "reddit": RedditAdapter.from_env,
 }
@@ -47,6 +47,7 @@ REQUIRED_KEY = {"github": "GITHUB_TOKEN", "stackexchange": "STACKEXCHANGE_KEY"}
 QUERIES_FILE = Path(__file__).with_name("queries.toml")
 #: Optional list keys per source in queries.toml → (adapter kwarg, overriding env var).
 SOURCE_LISTS: dict[str, dict[str, tuple[str, str]]] = {
+    "github": {"discussions": ("discussion_queries", "GITHUB_DISCUSSION_QUERIES")},
     "stackexchange": {"sites": ("sites", "STACKEXCHANGE_SITES")},
     "reddit": {"subreddits": ("subreddits", "REDDIT_SUBREDDITS")},
 }
@@ -108,6 +109,36 @@ def adapter_kwargs(source: str, cfg: Mapping[str, SourceQueries] = QUERY_CONFIG
 RUN_STATUS = {"success": "Success", "partial": "Partial", "failed": "Failed"}
 DEFAULT_LIMIT = 50
 DEFAULT_SINCE_DAYS = 14
+#: Overlap subtracted from the last successful run's start so items published while that
+#: run was in flight are not missed (re-fetches are skipped as duplicates by the store).
+SINCE_OVERLAP = timedelta(hours=1)
+
+
+def choose_since(started: datetime, source: str, since_days: int | None,
+                 store: object | None) -> tuple[datetime, str]:
+    """Look-back window for this run and why (IF-75).
+
+    ``flag``: explicit --since-days wins. ``last_success``: started_at of the latest
+    Success run for the source minus SINCE_OVERLAP, never further back than
+    DEFAULT_SINCE_DAYS. ``default``: DEFAULT_SINCE_DAYS when there is no such run, no
+    store (dry-run / Supabase not configured) or the lookup fails.
+    """
+    if since_days is not None:
+        return started - timedelta(days=since_days), "flag"
+    floor = started - timedelta(days=DEFAULT_SINCE_DAYS)
+    last = None
+    lookup = getattr(store, "last_success_started_at", None)
+    if lookup is not None:
+        try:
+            last = lookup(source)
+        except HttpError as exc:
+            log.warning("last successful run lookup failed (HTTP %s); using default window",
+                        exc.status)
+    if last is None:
+        return floor, "default"
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=UTC)
+    return max(floor, min(started, last - SINCE_OVERLAP)), "last_success"
 
 
 def collect(adapter: SourceAdapter, queries: Sequence[str], since: datetime,
@@ -116,11 +147,10 @@ def collect(adapter: SourceAdapter, queries: Sequence[str], since: datetime,
     seen: set[str] = set()
 
     def stream() -> Iterator[RawSignal]:
-        for query in queries:
-            for signal in adapter.fetch(query, since):
-                if signal.external_id not in seen:
-                    seen.add(signal.external_id)
-                    yield signal
+        for signal in adapter.fetch_all(queries, since):
+            if signal.external_id not in seen:
+                seen.add(signal.external_id)
+                yield signal
 
     return itertools.islice(stream(), limit)
 
@@ -148,15 +178,18 @@ def run(argv: Sequence[str] | None = None, *,
     parser.add_argument("--source", required=True, choices=sorted(ADAPTERS))
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     parser.add_argument("--query", action="append", dest="queries")
-    parser.add_argument("--since-days", type=int, default=DEFAULT_SINCE_DAYS)
+    parser.add_argument("--since-days", type=int, default=None,
+                        help=f"look-back in days (default: since the last successful run "
+                             f"for the source, at most {DEFAULT_SINCE_DAYS})")
     parser.add_argument("--dry-run", action="store_true",
                         help="fetch and count only; write nothing")
     args = parser.parse_args(argv)
     if args.limit < 1:
         parser.error("--limit must be >= 1")
+    if args.since_days is not None and args.since_days < 0:
+        parser.error("--since-days must be >= 0")
 
     started = now()
-    since = started - timedelta(days=args.since_days)
     queries = args.queries or DEFAULT_QUERIES[args.source]
     try:
         adapter = (adapter_factory or (lambda s: ADAPTERS[s](**adapter_kwargs(s))))(args.source)
@@ -164,6 +197,9 @@ def run(argv: Sequence[str] | None = None, *,
     except MissingSecretError as exc:
         print(f"error: {exc}", file=out)
         return 2
+
+    since, since_reason = choose_since(started, args.source, args.since_days, store)
+    print(f"since={since.isoformat()} reason={since_reason}", file=out)
 
     status, error, summary = "success", None, None
     fetched: list[RawSignal] = []

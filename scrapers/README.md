@@ -29,7 +29,7 @@ scrapers/
 
 Run: `pip install -r scrapers/requirements.txt && ruff check scrapers && pytest scrapers`
 
-Env vars: `GITHUB_TOKEN`, `STACKEXCHANGE_KEY`, `SCRAPER_USER_AGENT` (optional),
+Env vars: `GITHUB_TOKEN`, `GITHUB_DISCUSSION_QUERIES` (optional), `STACKEXCHANGE_KEY`, `SCRAPER_USER_AGENT` (optional),
 `LLM_PROVIDER`/`LLM_MODEL`/`LLM_API_KEY`, `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/
 `EMBEDDING_API_KEY`/`EMBEDDING_DIMENSIONS` (must be 1536). Adding a source = one new
 `SourceAdapter` subclass; G2/Capterra are Phase 2 and intentionally absent.
@@ -75,11 +75,17 @@ line is the shared-budget estimate. Missing Supabase secrets or a failed read pr
 ## Ingest
 
 ```
-python -m scrapers.ingest --source {github,hackernews,reddit,stackexchange} [--limit 50] [--query Q ...] [--since-days 14] [--dry-run]
+python -m scrapers.ingest --source {github,hackernews,reddit,stackexchange} [--limit 50] [--query Q ...] [--since-days D] [--dry-run]
 ```
 
 Needs `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (not for `--dry-run`). Re-runs are safe:
 rows already present for `(source_platform, external_id)` are skipped, never overwritten.
+
+**Look-back window (IF-75).** Without `--since-days`, ingest starts from the `started_at` of
+the newest `Success` row in `ingestion_runs` for that source, minus a 1-hour overlap
+(`SINCE_OVERLAP`), never more than 14 days back. With no such row, in `--dry-run`, or if the
+lookup fails, it uses the 14-day default; an explicit `--since-days` always wins. Each run
+prints `since=<iso> reason=last_success|default|flag`.
 
 ### Default queries — `scrapers/queries.toml` (IF-51)
 
@@ -90,6 +96,20 @@ merge request that changes the file is the review record. The file can also hold
 `REDDIT_SUBREDDITS` still override them. A test fails if an `ingest.ADAPTERS` source has no
 entry, if an unknown source (e.g. `g2`) appears, or if an entry lacks its comment. Keep
 it short: every query costs API requests (adapters keep their rate limits and page caps).
+
+### GitHub Issues + Discussions (IF-74)
+
+`--source github` runs two streams on one `HttpClient` (2.5 s spacing, `X-RateLimit-*` /
+`Retry-After` handling) and interleaves them so a shared `--limit` reaches both:
+- **Issues** — REST `search/issues` with `[github] queries` (unchanged).
+- **Discussions** — official GraphQL API, `search(type: DISCUSSION)` POSTed to
+  `https://api.github.com/graphql` with `GITHUB_TOKEN` (plain HTTPS, no client library), using
+  `[github] discussions` from `queries.toml` (override: `GITHUB_DISCUSSION_QUERIES`,
+  comma-separated). 50 per page, at most 2 pages per query. Stored as
+  `source_platform=github`, `external_id=discussion:<owner>/<repo>#<number>`, tags
+  `["discussion", <category>]`. GraphQL `errors` or any HTTP failure stop the discussion
+  stream with a warning; issues are never affected. Note: Claude Code cloud sessions block
+  GraphQL (HTTP 403), so discussions only arrive when ingest runs elsewhere.
 
 ### Reddit
 
