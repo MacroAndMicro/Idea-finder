@@ -15,7 +15,7 @@ import com.idea_finder.repo.domain.OpportunityCardRepository;
 import com.idea_finder.repo.domain.RawSignalRepository;
 import com.idea_finder.repo.domain.SourcePlatform;
 
-/** Aggregate counts over cards and raw signals (a handful of COUNT queries, no caching yet). */
+/** Aggregate counts over cards, raw signals and extractions (a handful of COUNT queries, no caching yet). */
 @Service
 @Transactional(readOnly = true)
 public class StatsService {
@@ -42,7 +42,8 @@ public class StatsService {
 			bySource(signals.countBySource()),
 			signals.countByProcessedAtIsNull(),
 			signals.lastFetchedAt(),
-			lastRuns(runs.findLatestPerSource()));
+			lastRuns(runs.findLatestPerSource()),
+			StatsResponse.Pipeline.of(signals.pipelineCounts()));
 	}
 
 	/** Phase 1 sources first (null when never run), then any other source that has runs. */

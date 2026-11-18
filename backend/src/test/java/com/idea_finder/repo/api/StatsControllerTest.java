@@ -74,7 +74,39 @@ class StatsControllerTest {
 	void existingFieldsUnchanged() throws Exception {
 		mvc.perform(get("/api/stats"))
 			.andExpect(jsonPath("$.keys()").value(contains("total_cards", "cards_by_source", "total_signals",
-				"signals_by_source", "unprocessed_signals", "last_signal_fetched_at", "last_runs")));
+				"signals_by_source", "unprocessed_signals", "last_signal_fetched_at", "last_runs", "pipeline")));
+	}
+
+	/** IF-45: no embeddings or extractions in the base fixture, so the funnel is all zeros. */
+	@Test
+	void pipelineZeroWithoutExtractions() throws Exception {
+		mvc.perform(get("/api/stats"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.pipeline.keys()").value(contains("embedded_signals", "extracted_signals",
+				"pain_points", "b2b_pain_points", "failed_extractions")))
+			.andExpect(jsonPath("$.pipeline.embedded_signals").value(0))
+			.andExpect(jsonPath("$.pipeline.extracted_signals").value(0))
+			.andExpect(jsonPath("$.pipeline.pain_points").value(0))
+			.andExpect(jsonPath("$.pipeline.b2b_pain_points").value(0))
+			.andExpect(jsonPath("$.pipeline.failed_extractions").value(0));
+	}
+
+	/** IF-45: funnel counts over seeded embeddings and extractions. */
+	@Test
+	@Sql(scripts = {TestDb.SCHEMA, TestDb.DATA, TestDb.PIPELINE}, config = @SqlConfig(separator = TestDb.WHOLE_FILE))
+	void pipelineFunnelCounts() throws Exception {
+		mvc.perform(get("/api/stats"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.pipeline.embedded_signals").value(3))
+			.andExpect(jsonPath("$.pipeline.extracted_signals").value(4))
+			.andExpect(jsonPath("$.pipeline.pain_points").value(2))
+			.andExpect(jsonPath("$.pipeline.b2b_pain_points").value(1))
+			.andExpect(jsonPath("$.pipeline.failed_extractions").value(1))
+			// existing fields unchanged by the pipeline fixture
+			.andExpect(jsonPath("$.total_signals").value(4))
+			.andExpect(jsonPath("$.unprocessed_signals").value(2))
+			// extraction text is never exposed
+			.andExpect(content().string(not(containsString("B2B pain"))));
 	}
 
 	@Test

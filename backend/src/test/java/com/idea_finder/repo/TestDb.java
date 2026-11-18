@@ -16,6 +16,9 @@ public final class TestDb {
 	/** IF-24 fixture vectors for cards 1-5 (pgvector is required by the migrations). */
 	public static final String EMBEDDINGS = "/db/opportunity_cards_test_embeddings.sql";
 
+	/** IF-45 raw_signals embeddings + signal_extractions on top of {@link #DATA}. */
+	public static final String PIPELINE = "/db/pipeline_test_data.sql";
+
 	/** Run each script as a single statement (the reset script is a DO $$ block). */
 	public static final String WHOLE_FILE = ScriptUtils.EOF_STATEMENT_SEPARATOR;
 
