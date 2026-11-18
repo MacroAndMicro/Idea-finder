@@ -22,6 +22,10 @@ Provider/network errors leave the signals unprocessed for the next run; after
 stops the run at once (results already validated are kept). ``--max-requests`` caps LLM
 requests per run so a day's budget is explicit; signals beyond it wait for the next run.
 
+``--dry-run`` makes no LLM requests and writes nothing: it prints the plan (signals that
+would be sent, batch count, requests that would be used against ``--max-requests``) and
+exits 0, so a smoke test never spends the daily quota (IF-85).
+
 Post text is untrusted: fenced in <signal> tags and the system prompt forbids
 following instructions inside it. Never prints secrets or post content.
 """
@@ -255,6 +259,24 @@ class Runner:
                 self.single(signal, 1)
 
 
+def print_plan(llm: LLMClient, args: argparse.Namespace, ranked: Sequence[dict[str, Any]],
+               skipped: Sequence[dict[str, Any]], signals: Sequence[dict[str, Any]],
+               out) -> None:
+    """Dry-run summary: what a real run would send. Makes no LLM request."""
+    batches = len(_chunks(signals, args.batch_size))
+    planned = batches if args.max_requests is None else min(batches, args.max_requests)
+    cap = "none" if args.max_requests is None else str(args.max_requests)
+    prompt = prompt_v1.PROMPT_VERSION if args.batch_size == 1 else prompt_batch.PROMPT_VERSION
+    print(
+        f"extract mode=dry-run provider={llm.provider} model={llm.model} "
+        f"prompt={prompt} batch_size={args.batch_size} unprocessed={len(ranked)} "
+        f"skipped={len(skipped)} candidates={len(signals)} batches={batches} "
+        f"planned_requests={planned} max_requests={cap} requests=0 "
+        "(retries of invalid items not counted)",
+        file=out,
+    )
+
+
 def run(argv: Sequence[str] | None = None, *,
         llm_factory: Callable[[], LLMClient] = llm_client_from_env,
         store_factory: Callable[[], SupabaseStore] = SupabaseStore.from_env,
@@ -268,7 +290,7 @@ def run(argv: Sequence[str] | None = None, *,
     parser.add_argument("--max-requests", type=int, default=None,
                         help="max LLM requests this run (default: no cap)")
     parser.add_argument("--dry-run", action="store_true",
-                        help="call the LLM and validate, but write nothing")
+                        help="print the plan; no LLM requests, no writes")
     args = parser.parse_args(argv)
     if args.limit < 1:
         parser.error("--limit must be >= 1")
@@ -290,15 +312,17 @@ def run(argv: Sequence[str] | None = None, *,
         print(f"error: could not read raw_signals (HTTP {exc.status})", file=out)
         return 1
     signals = ranked[:args.limit]
-    if not args.dry_run:
-        try:
-            for sig in skipped:  # processed_at set, no extraction row = pre-filter skip
-                store.mark_processed(int(sig["id"]), now())
-        except HttpError as exc:
-            print(f"error: could not mark skipped signals (HTTP {exc.status})", file=out)
-            return 1
+    if args.dry_run:
+        print_plan(llm, args, ranked, skipped, signals, out)
+        return 0
+    try:
+        for sig in skipped:  # processed_at set, no extraction row = pre-filter skip
+            store.mark_processed(int(sig["id"]), now())
+    except HttpError as exc:
+        print(f"error: could not mark skipped signals (HTTP {exc.status})", file=out)
+        return 1
 
-    runner = Runner(llm, store, Budget(llm, args.max_requests), now, args.dry_run, out)
+    runner = Runner(llm, store, Budget(llm, args.max_requests), now, False, out)
     try:
         for batch in _chunks(signals, args.batch_size):
             runner.batch(batch)
@@ -308,7 +332,7 @@ def run(argv: Sequence[str] | None = None, *,
         return 1
 
     stats = runner.stats
-    mode = "dry-run" if args.dry_run else "stored"
+    mode = "stored"
     prompt = prompt_v1.PROMPT_VERSION if args.batch_size == 1 else prompt_batch.PROMPT_VERSION
     print(
         f"extract mode={mode} provider={llm.provider} model={llm.model} "

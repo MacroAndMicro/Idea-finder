@@ -10,6 +10,9 @@ Which signals: by default only signals whose extraction says ``is_pain_point`` a
 ``is_b2b`` — the only ones clustering uses (scrapers/cluster.py), so we don't pay to
 embed noise. Signals with no extraction yet are skipped until `scrapers.extract`
 has run. ``--all`` embeds every signal with a null embedding regardless (backfill).
+
+``--dry-run`` makes no embedding requests and writes nothing: it prints how many signals
+would be embedded and in how many requests, then exits 0 (IF-85).
 """
 
 from __future__ import annotations
@@ -60,7 +63,7 @@ def run(argv: Sequence[str] | None = None, *,
     parser.add_argument("--all", action="store_true", dest="all_signals",
                         help="embed every signal with a null embedding, not only B2B pain")
     parser.add_argument("--dry-run", action="store_true",
-                        help="embed but write nothing")
+                        help="print the plan; no embedding requests, no writes")
     args = parser.parse_args(argv)
     if args.limit < 1:
         parser.error("--limit must be >= 1")
@@ -82,14 +85,21 @@ def run(argv: Sequence[str] | None = None, *,
     status = "success"
     candidates = [s for s in signals if embed_text(s)]
     skipped = len(signals) - len(candidates)
+    scope = "all" if args.all_signals else "b2b-pain"
+    if args.dry_run:
+        batches = -(-len(candidates) // BATCH_SIZE)
+        print(f"embed mode=dry-run scope={scope} model={embedder.embedding_model} "
+              f"candidates={len(signals)} would_embed={len(candidates)} "
+              f"skipped_empty={skipped} planned_requests={batches} requests=0 "
+              "status=success", file=out)
+        return 0
     for start in range(0, len(candidates), BATCH_SIZE):
         batch = candidates[start:start + BATCH_SIZE]
         try:
             vectors = embedder.embed([embed_text(s) for s in batch])
-            if not args.dry_run:
-                for signal, vec in zip(batch, vectors, strict=True):
-                    store.save_signal_embedding(int(signal["id"]), vector_literal(vec),
-                                                embedder.embedding_model)
+            for signal, vec in zip(batch, vectors, strict=True):
+                store.save_signal_embedding(int(signal["id"]), vector_literal(vec),
+                                            embedder.embedding_model)
         except EmbeddingDimensionError as exc:
             print(f"error: {exc}", file=out)
             status = "failed"
@@ -101,9 +111,7 @@ def run(argv: Sequence[str] | None = None, *,
             break
         embedded += len(batch)
 
-    mode = "dry-run" if args.dry_run else "stored"
-    scope = "all" if args.all_signals else "b2b-pain"
-    print(f"embed mode={mode} scope={scope} model={embedder.embedding_model} "
+    print(f"embed mode=stored scope={scope} model={embedder.embedding_model} "
           f"candidates={len(signals)} embedded={embedded} skipped_empty={skipped} "
           f"status={status}", file=out)
     return 0 if status == "success" else 1

@@ -17,7 +17,7 @@ Runs each module's own ``run()`` in order (no duplicated logic):
 
 A failing source or stage is reported and the remaining stages still run. Exit code 0
 only if no stage failed (skipped stages do not count as failures). ``--dry-run`` passes
-``--dry-run`` to ingest, embed and synthesize and skips extract (it would spend LLM quota).
+``--dry-run`` to every stage; no stage then makes an LLM/embedding request or writes (IF-85).
 Each module prints its own counts; this runner adds one status line per stage, a
 final total and (IF-65, read-only) one ``backlog`` line per source: ingested, extracted,
 skipped (pre-filter), unprocessed and estimated days to clear at ``--extract-limit``
@@ -200,13 +200,10 @@ def run(argv: Sequence[str] | None = None, *,
             continue
         record(_call(stage["ingest"], name, ["--source", source, *dry], out))
 
-    if args.dry_run:
-        record(StageResult("extract", "skipped", "dry-run (would spend LLM quota)"))
-    else:
-        record(_call(stage["extract"], "extract",
-                     ["--limit", str(args.extract_limit),
-                      "--batch-size", str(args.extract_batch_size),
-                      "--max-requests", str(args.extract_max_requests)], out))
+    record(_call(stage["extract"], "extract",
+                 ["--limit", str(args.extract_limit),
+                  "--batch-size", str(args.extract_batch_size),
+                  "--max-requests", str(args.extract_max_requests), *dry], out))
 
     record(_call(stage["embed"], "embed", [*dry], out))
 
