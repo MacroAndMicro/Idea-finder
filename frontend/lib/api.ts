@@ -1,4 +1,4 @@
-import type { Facets, OpportunityCard, PageResponse, Signal, Stats } from "./types";
+import type { Facets, IngestionRun, OpportunityCard, PageResponse, Signal, Stats } from "./types";
 
 const BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080").replace(/\/$/, "");
 
@@ -112,4 +112,23 @@ export function fetchStats(signal?: AbortSignal): Promise<Stats> {
 export function fetchFacets(q: CardQuery, signal?: AbortSignal): Promise<Facets> {
   const qs = filterParams(q).toString();
   return getJson(qs ? `/api/cards/facets?${qs}` : "/api/cards/facets", signal);
+}
+
+export const RUNS_PAGE_SIZE = 20;
+
+export interface RunQuery {
+  source?: string;
+  status?: string;
+  page?: number;
+  size?: number;
+}
+
+/** Recent ingestion runs, newest first (GET /api/ingestion-runs). */
+export function fetchRuns(q: RunQuery, signal?: AbortSignal): Promise<PageResponse<IngestionRun>> {
+  const params = new URLSearchParams();
+  if (q.source) params.set("source", q.source);
+  if (q.status) params.set("status", q.status);
+  params.set("page", String(q.page ?? 0));
+  params.set("size", String(q.size ?? RUNS_PAGE_SIZE));
+  return getJson(`/api/ingestion-runs?${params}`, signal);
 }

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
+import NavLink from "@/components/NavLink";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -33,16 +33,15 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           Skip to content
         </a>
         <header className="border-b border-border bg-surface">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2">
             <span className="text-lg font-semibold tracking-tight">Idea Finder</span>
-            <nav aria-label="Primary">
-              <Link
-                href="/"
-                aria-current="page"
-                className="inline-flex min-h-11 items-center rounded px-3 text-sm font-medium text-accent underline-offset-4 hover:underline"
-              >
+            <nav aria-label="Primary" className="flex gap-1">
+              <NavLink href="/" match={["/", "/cards"]}>
                 Opportunities
-              </Link>
+              </NavLink>
+              <NavLink href="/runs" match={["/runs"]}>
+                Ingestion runs
+              </NavLink>
             </nav>
           </div>
         </header>

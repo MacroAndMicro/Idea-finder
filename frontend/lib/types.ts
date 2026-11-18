@@ -77,3 +77,21 @@ export interface Facets {
   economic_intent: Partial<Record<EconomicIntent, number>>;
   is_b2b_filtered: { true?: number; false?: number };
 }
+
+/** Mirrors the ingestion_runs_status_chk constraint. */
+export type RunStatus = "Success" | "Partial" | "Failed";
+
+/** Mirrors the backend IngestionRunResponse (GET /api/ingestion-runs): one ingestion run. */
+export interface IngestionRun {
+  id: number;
+  source_platform: SourcePlatform;
+  started_at: string;
+  /** Null while a run has not finished (or if it never recorded an end time). */
+  finished_at: string | null;
+  status: RunStatus | string;
+  fetched_count: number;
+  inserted_count: number;
+  skipped_count: number;
+  /** Short error text (the API caps it at 500 characters); null on clean runs. */
+  error_summary: string | null;
+}
