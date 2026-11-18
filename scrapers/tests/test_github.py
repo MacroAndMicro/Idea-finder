@@ -22,7 +22,7 @@ def test_maps_issues_and_skips_pull_requests(make_client):
 
     req = transport.requests[0]
     assert req.headers["Authorization"] == "Bearer tok"
-    assert "is%3Aissue" in req.url and "created%3A%3E2026-11-01" in req.url
+    assert "is%3Aissue" in req.url and "created%3A%3E%3D2026-11-01T00%3A00%3A00Z" in req.url
     assert "reactions%3A%3E%3D5" in req.url and "label%3A%22enhancement%22" in req.url
     assert "tok" not in req.url  # token only in the header
 
@@ -69,3 +69,24 @@ def test_missing_token_skips_with_clear_message(make_client, monkeypatch, caplog
         assert list(GitHubIssuesAdapter.from_env(client=client).fetch("q", SINCE)) == []
     assert "GITHUB_TOKEN is not set" in caplog.text
     assert transport.requests == []
+
+
+def test_since_filter_uses_full_utc_instant_not_date():
+    # IF-83: created:>2026-11-18 excluded the rest of Nov 18 (e.g. an 11:00Z issue).
+    from datetime import timedelta, timezone
+
+    from scrapers.adapters.github import created_filter
+
+    since = datetime(2026, 11, 18, 10, 30, tzinfo=UTC)
+    q = GitHubIssuesAdapter("tok").build_query("webhook", since)
+    assert "created:>=2026-11-18T10:30:00Z" in q
+    assert "created:>2026-11-18 " not in q + " "
+    # the instant compares correctly against an item created later that day
+    item_created = datetime(2026, 11, 18, 11, 0, tzinfo=UTC)
+    assert item_created >= since
+    # naive → UTC; other offsets normalised to UTC
+    assert created_filter(datetime(2026, 11, 18, 10, 30)) == "created:>=2026-11-18T10:30:00Z"
+    cet = timezone(timedelta(hours=1))
+    assert created_filter(datetime(2026, 11, 18, 11, 30, tzinfo=cet)) == (
+        "created:>=2026-11-18T10:30:00Z"
+    )
