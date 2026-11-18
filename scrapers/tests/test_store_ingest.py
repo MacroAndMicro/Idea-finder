@@ -175,9 +175,9 @@ def test_cli_http_error_reports_failure():
     assert store.runs[0]["error_summary"] == "fetch hackernews: HTTP 500"
 
 
-def test_cli_rejects_reddit_and_bad_limit():
+def test_cli_rejects_unknown_source_and_bad_limit():
     with pytest.raises(SystemExit):
-        run_cli(["--source", "reddit"], StubAdapter({}))
+        run_cli(["--source", "g2"], StubAdapter({}))
     with pytest.raises(SystemExit):
         run_cli(["--source", "hackernews", "--limit", "0"], StubAdapter({}))
 

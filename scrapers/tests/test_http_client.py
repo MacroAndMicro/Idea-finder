@@ -75,3 +75,35 @@ def test_min_interval_spaces_requests(make_client, clock):
     client.get("https://api.example.com/x")
     client.get("https://api.example.com/x")
     assert clock.sleeps == [2.0]
+
+
+def test_retry_hint_too_long_raises_quota_exhausted_without_retry(make_client, clock):
+    from scrapers.http_client import QuotaExhausted
+
+    client, transport = make_client([status(429), ok({})], max_wait=60,
+                                    retry_hint=lambda resp: 17399.0)
+    with pytest.raises(QuotaExhausted):
+        client.get("https://api.example.com/x")
+    assert len(transport.requests) == 1 and clock.sleeps == []
+
+
+def test_short_retry_hint_is_honoured(make_client, clock):
+    client, _ = make_client([status(429), ok({})], retry_hint=lambda resp: 5.0)
+    client.get("https://api.example.com/x")
+    assert clock.sleeps == [5.0]
+
+
+def test_relative_ratelimit_reset_reddit_style(make_client, clock):
+    hdrs = {"X-Ratelimit-Remaining": "0.0", "X-Ratelimit-Reset": "42"}
+    client, _ = make_client([ok({}, hdrs), ok({})])
+    client.get("https://oauth.example.com/x")
+    client.get("https://oauth.example.com/x")
+    assert clock.sleeps == [43.0]
+
+
+def test_post_form_encodes_fields(make_client):
+    client, transport = make_client([ok({})])
+    client.post_form("https://api.example.com/token", {"grant_type": "client_credentials"})
+    req = transport.requests[0]
+    assert req.body == b"grant_type=client_credentials"
+    assert req.headers["Content-Type"] == "application/x-www-form-urlencoded"

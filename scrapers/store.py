@@ -24,8 +24,11 @@ log = logging.getLogger(__name__)
 RAW_SIGNALS_TABLE = "raw_signals"
 INGESTION_RUNS_TABLE = "ingestion_runs"
 SIGNAL_EXTRACTIONS_TABLE = "signal_extractions"
+CARDS_TABLE = "opportunity_cards"
+CARD_SIGNALS_TABLE = "card_signals"
 CONFLICT_COLUMNS = "source_platform,external_id"
 BATCH_SIZE = 200  # rows per POST; keeps payloads well under PostgREST limits
+READ_PAGE_SIZE = 1000  # Supabase's default max-rows; never ask for more per request
 
 
 @dataclass
@@ -124,6 +127,17 @@ class SupabaseStore:
         data = resp.json() if resp.body else []
         return data if isinstance(data, list) else []
 
+    def select_all(self, table: str, params: Mapping[str, Any],
+                   page_size: int = READ_PAGE_SIZE) -> list[dict[str, Any]]:
+        """Every matching row, paged with limit/offset (Supabase caps a read at max-rows,
+        1000 by default). ``params`` must include a stable ``order``."""
+        rows: list[dict[str, Any]] = []
+        while True:
+            page = self.select(table, {**params, "limit": page_size, "offset": len(rows)})
+            rows.extend(page)
+            if len(page) < page_size:
+                return rows
+
     def patch(self, table: str, filters: Mapping[str, str], values: Mapping[str, Any]) -> None:
         query = "&".join(f"{k}={v}" for k, v in filters.items())
         self.client.patch_json(f"{self._base}/{table}?{query}", dict(values),
@@ -165,3 +179,45 @@ class SupabaseStore:
     def save_signal_embedding(self, signal_id: int, vector: str, model: str) -> None:
         self.patch(RAW_SIGNALS_TABLE, {"id": f"eq.{int(signal_id)}"},
                    {"embedding": vector, "embedding_model": model})
+
+    # ---- card synthesis (scrapers.synthesize) ----
+
+    def fetch_cluster_candidates(self) -> list[dict[str, Any]]:
+        """Embedded raw_signals whose extraction is a B2B pain point, with its facts."""
+        return self.select_all(RAW_SIGNALS_TABLE, {
+            "select": "id,source_platform,url,title,body,score,comment_count,"
+                      "source_created_at,embedding,signal_extractions!inner("
+                      "problem_summary,duct_tape,economic_intent,persona,workflow_tags)",
+            "embedding": "not.is.null",
+            "signal_extractions.is_pain_point": "is.true",
+            "signal_extractions.is_b2b": "is.true",
+            "order": "id.asc",
+        })
+
+    def fetch_card_links(self) -> list[dict[str, Any]]:
+        return self.select_all(CARD_SIGNALS_TABLE, {"select": "card_id,signal_id",
+                                                    "order": "card_id.asc,signal_id.asc"})
+
+    def fetch_cards(self) -> list[dict[str, Any]]:
+        """B2B cards with their embedding, for duplicate detection."""
+        return self.select_all(CARDS_TABLE, {
+            "select": "id,embedding,trigger_context",
+            "is_b2b_filtered": "is.true",
+            "order": "id.asc",
+        })
+
+    def insert_card(self, row: Mapping[str, Any]) -> int:
+        returned = self._post(CARDS_TABLE, [dict(row)], "return=representation",
+                              "?select=id")
+        if not isinstance(returned, list) or not returned:
+            raise HttpError(0, f"{self._base}/{CARDS_TABLE}", "insert returned no id")
+        return int(returned[0]["id"])
+
+    def update_card(self, card_id: int, values: Mapping[str, Any]) -> None:
+        self.patch(CARDS_TABLE, {"id": f"eq.{int(card_id)}"}, values)
+
+    def link_card_signals(self, card_id: int, signal_ids: Iterable[int]) -> None:
+        rows = [{"card_id": int(card_id), "signal_id": int(s)} for s in sorted(set(signal_ids))]
+        if rows:
+            self._post(CARD_SIGNALS_TABLE, rows, "resolution=ignore-duplicates,return=minimal",
+                       "?on_conflict=card_id,signal_id")

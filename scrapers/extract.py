@@ -11,7 +11,9 @@ Invalid model output is retried once; if it is still invalid the signal is recor
 as failed: a signal_extractions row with is_pain_point / is_b2b = null (so it is
 never clustered) and processed_at set, so it is not retried forever.
 Provider/network errors leave the signal unprocessed for the next run; after
-``MAX_CONSECUTIVE_PROVIDER_ERRORS`` in a row the run stops.
+``MAX_CONSECUTIVE_PROVIDER_ERRORS`` in a row the run stops. A quota-exhausted
+response (e.g. a per-day free-tier limit) stops the run at once: retrying would only
+burn requests.
 
 Post text is untrusted: it is fenced in <signal> tags and the system prompt forbids
 following instructions inside it. Never prints secrets or post content.
@@ -28,7 +30,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from scrapers.config import MissingSecretError
-from scrapers.http_client import HttpError
+from scrapers.http_client import HttpError, QuotaExhausted
 from scrapers.llm.base import LLMClient, ProviderNotSupportedError
 from scrapers.llm.extraction_schema import (
     ExtractionValidationError,
@@ -119,6 +121,11 @@ def run(argv: Sequence[str] | None = None, *,
     for signal in signals:
         try:
             result = extract_one(llm, signal)
+        except QuotaExhausted as exc:
+            stats.provider_errors += 1
+            print(f"error: LLM quota exhausted (HTTP {exc.status}); stopping — "
+                  "remaining signals are left for the next run", file=out)
+            break
         except (HttpError, RuntimeError) as exc:
             stats.provider_errors += 1
             consecutive_errors += 1
