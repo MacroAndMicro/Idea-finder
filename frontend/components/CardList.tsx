@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { errorMessage, fetchCards, fetchFacets, queryFromParams, queryToParams, type CardQuery } from "@/lib/api";
 import type { Facets, OpportunityCard, PageResponse } from "@/lib/types";
 import OpportunityCardView from "./OpportunityCardView";
+import PipelineEmptyState from "./PipelineEmptyState";
 import SearchBox from "./SearchBox";
 
 // min-w keeps selects from changing width when facet counts arrive.
@@ -87,6 +88,8 @@ export default function CardList() {
   // Reset clears every filter (not the search box or sort, which have their own controls).
   const resetFilters = () =>
     set({ source: undefined, intent: undefined, minConfidence: undefined, b2b: false, created: undefined });
+  // "Filtered" = anything that narrows the list; an empty unfiltered list means no cards exist yet.
+  const filtered = activeFilters > 0 || !!query.q;
   const sortChanged = query.sort !== "confidence";
   const onSearch = useCallback((q: string | undefined) => setQuery({ ...query, q, page: 0 }), [query, setQuery]);
 
@@ -207,26 +210,32 @@ export default function CardList() {
             </button>
           </div>
         )}
-        {state.kind === "ok" && state.data.items.length === 0 && (
+        {state.kind === "ok" && state.data.items.length === 0 && filtered && (
           <div className="rounded-lg border border-dashed border-border p-8 text-center">
-            {query.q ? (
-              <>
-                <p className="font-medium">
+            <p className="font-medium">
+              {query.q ? (
+                <>
                   No opportunities match “<span className="break-words">{query.q}</span>”
-                </p>
-                <p className="mt-1 text-sm text-muted">Try a shorter or different keyword, or loosen the filters.</p>
-              </>
-            ) : (
-              <>
-                <p className="font-medium">No opportunity cards yet</p>
-                <p className="mt-1 text-sm text-muted">
-                  Cards appear once signals are ingested and extracted. Try loosening the filters.
-                </p>
-              </>
-            )}
+                </>
+              ) : (
+                "No opportunities match these filters"
+              )}
+            </p>
+            <p className="mt-1 text-sm text-muted">
+              {query.q ? "Try a shorter or different keyword, or loosen the filters." : "Try loosening the filters."}
+            </p>
+            <button
+              type="button"
+              onClick={() => setQuery({ sort: query.sort, page: 0 })}
+              className="mt-3 min-h-11 rounded border border-border bg-surface px-4 text-sm font-medium"
+            >
+              {query.q ? "Clear search and filters" : "Clear filters"}
+            </button>
           </div>
         )}
       </div>
+
+      {state.kind === "ok" && state.data.items.length === 0 && !filtered && <PipelineEmptyState />}
 
       {state.kind === "ok" && state.data.items.length > 0 && (
         <>

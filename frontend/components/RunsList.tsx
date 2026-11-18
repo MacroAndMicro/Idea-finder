@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { errorMessage, fetchRuns, RUNS_PAGE_SIZE } from "@/lib/api";
 import { SOURCE_LABELS, type IngestionRun, type PageResponse, type SourcePlatform } from "@/lib/types";
+import { absFmt, relative } from "@/lib/time";
 import { SourceBadge } from "./CardMeta";
 
 /** Phase 1 sources, in the same order as everywhere else. */
@@ -11,27 +12,6 @@ const STATUSES = ["Success", "Partial", "Failed"] as const;
 
 const selectCls = "min-h-11 min-w-44 rounded border border-border bg-surface px-2 text-sm text-foreground";
 const num = new Intl.NumberFormat("en");
-const absFmt = new Intl.DateTimeFormat("en", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-  timeZone: "UTC",
-});
-const relFmt = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-
-/** "3 hours ago" relative to `now` (both epoch ms). */
-function relative(ms: number, now: number): string {
-  const s = Math.round((ms - now) / 1000);
-  const abs = Math.abs(s);
-  if (abs < 60) return relFmt.format(s, "second");
-  if (abs < 3600) return relFmt.format(Math.round(s / 60), "minute");
-  if (abs < 86400) return relFmt.format(Math.round(s / 3600), "hour");
-  return relFmt.format(Math.round(s / 86400), "day");
-}
-
 /** "2 min 5 s" between two ISO times, or null when either is missing/invalid. */
 function duration(start: string, end: string | null): string | null {
   if (!end) return null;

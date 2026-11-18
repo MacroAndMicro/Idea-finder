@@ -62,12 +62,24 @@ export interface Signal {
   source_created_at: string | null;
 }
 
-/** Subset of the backend StatsResponse (GET /api/stats) used by the stats strip. */
+/** Subset of the backend StatsResponse (GET /api/stats) used by the stats strip and empty state. */
 export interface Stats {
   total_cards: number;
   cards_by_source: Partial<Record<SourcePlatform, number>>;
   total_signals: number;
   signals_by_source: Partial<Record<SourcePlatform, number>>;
+  /** When the newest raw signal was fetched; null before any ingestion. */
+  last_signal_fetched_at?: string | null;
+  /** Latest ingestion run per source (IF-23); both fields null when a source never ran. */
+  last_runs?: Partial<Record<SourcePlatform, { last_run_at: string | null; last_run_status: string | null }>>;
+  /** How far raw signals got through the pipeline (IF-45). */
+  pipeline?: {
+    embedded_signals: number;
+    extracted_signals: number;
+    pain_points: number;
+    b2b_pain_points: number;
+    failed_extractions: number;
+  };
 }
 
 /** Mirrors the backend FacetsResponse (GET /api/cards/facets). Each map ignores its own filter. */
