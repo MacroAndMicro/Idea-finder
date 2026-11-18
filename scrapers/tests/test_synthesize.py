@@ -407,3 +407,23 @@ def test_dry_run_prints_no_quality_line():
     _, out = run_cli(["--dry-run"], StubStore(two_clusters()), SeqLLM([]))
     assert "quality_gate" not in out
 
+
+# ---- IF-64 only classified B2B pain signals are clustered ----
+
+def test_cluster_candidates_require_b2b_pain_extraction(make_client):
+    client, transport = make_client([ok(json.dumps([]).encode())])
+    SupabaseStore("https://proj.supabase.co", SECRET, client).fetch_cluster_candidates()
+    url = transport.requests[0].url
+    assert "signal_extractions%21inner" in url or "signal_extractions!inner" in url
+    assert "signal_extractions.is_pain_point=is.true" in url
+    assert "signal_extractions.is_b2b=is.true" in url
+
+
+def test_embedded_signal_without_extraction_is_never_clustered():
+    unextracted = {**row(201, 0), "signal_extractions": None}
+    empty = {**row(202, 0, wobble=0.01), "signal_extractions": []}
+    assert synthesize.to_evidence(unextracted) is None
+    assert synthesize.to_evidence(empty) is None
+    code, out = run_cli(["--dry-run", "--min-signals", "1"],
+                        StubStore([unextracted, empty, row(203, 0)]), SeqLLM([]))
+    assert code == 0 and "signals=1 clusters=1" in out
