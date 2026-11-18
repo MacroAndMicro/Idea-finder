@@ -20,9 +20,7 @@ spring:
         # 0 = never use server-side prepared statements; they break under transaction pooling
         # ("prepared statement S_1 already exists").
         prepareThreshold: ${DB_PREPARE_THRESHOLD:0}
-  # Schema is owned by supabase/migrations/, not Flyway or Hibernate.
-  flyway:
-    enabled: false
+  # Schema is owned by supabase/migrations/ (manual §6), not Hibernate or a migration library.
   jpa:
     hibernate:
       ddl-auto: none
