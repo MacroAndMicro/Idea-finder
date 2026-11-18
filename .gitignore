@@ -20,3 +20,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+
+# IF-84: local copies of prod rows + local Postgres/backend runtime (scripts/local-api-from-prod.sh)
+.local-data/
