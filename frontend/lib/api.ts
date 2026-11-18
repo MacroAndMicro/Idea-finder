@@ -10,7 +10,26 @@ export interface CardQuery {
   minConfidence?: string;
   sort?: string;
   b2b?: boolean;
+  /** Only cards created in the last week / month (sent to the API as createdSince). */
+  created?: CreatedWindow;
   page?: number;
+}
+
+/** "New this week / month" windows, in days. */
+export const CREATED_WINDOWS = { week: 7, month: 30 } as const;
+export type CreatedWindow = keyof typeof CREATED_WINDOWS;
+
+function isCreatedWindow(v: string | null): v is CreatedWindow {
+  return v !== null && Object.hasOwn(CREATED_WINDOWS, v);
+}
+
+/**
+ * createdSince for a window: the UTC calendar date `days` ago (the API reads a bare date as the
+ * start of that day, UTC). A whole date rather than an instant keeps the URL stable all day, so
+ * the cacheable /api/cards/facets response is reused.
+ */
+export function createdSinceFor(w: CreatedWindow, now: number = Date.now()): string {
+  return new Date(now - CREATED_WINDOWS[w] * 86_400_000).toISOString().slice(0, 10);
 }
 
 export const SORTS = ["confidence", "recent", "newest"] as const;
@@ -29,6 +48,7 @@ export function cleanQ(raw: string | null | undefined): string | undefined {
 export function queryFromParams(p: URLSearchParams): CardQuery {
   const sort = p.get("sort") ?? "";
   const page = Number(p.get("page"));
+  const created = p.get("created");
   return {
     q: cleanQ(p.get("q")),
     source: p.get("source") ?? undefined,
@@ -36,6 +56,7 @@ export function queryFromParams(p: URLSearchParams): CardQuery {
     minConfidence: p.get("minConfidence") ?? undefined,
     sort: (SORTS as readonly string[]).includes(sort) ? sort : "confidence",
     b2b: p.get("b2b") === "true",
+    created: isCreatedWindow(created) ? created : undefined,
     page: Number.isInteger(page) && page > 0 ? page : 0,
   };
 }
@@ -49,6 +70,7 @@ export function queryToParams(q: CardQuery): URLSearchParams {
   if (q.minConfidence) p.set("minConfidence", q.minConfidence);
   if (q.sort && q.sort !== "confidence") p.set("sort", q.sort);
   if (q.b2b) p.set("b2b", "true");
+  if (q.created) p.set("created", q.created);
   if (q.page) p.set("page", String(q.page));
   return p;
 }
@@ -61,6 +83,7 @@ function filterParams(q: CardQuery): URLSearchParams {
   if (q.intent) params.set("intent", q.intent);
   if (q.minConfidence) params.set("minConfidence", q.minConfidence);
   if (q.b2b) params.set("b2b", "true");
+  if (q.created) params.set("createdSince", createdSinceFor(q.created));
   return params;
 }
 

@@ -54,8 +54,15 @@ export default function CardList() {
   // Facets: counts per filter option. Keyed by the filters (not page/sort) so
   // paging doesn't refetch; on error counts are simply left out.
   const facetQuery = useMemo(
-    () => ({ q: query.q, source: query.source, intent: query.intent, minConfidence: query.minConfidence, b2b: query.b2b }),
-    [query.q, query.source, query.intent, query.minConfidence, query.b2b],
+    () => ({
+      q: query.q,
+      source: query.source,
+      intent: query.intent,
+      minConfidence: query.minConfidence,
+      b2b: query.b2b,
+      created: query.created,
+    }),
+    [query.q, query.source, query.intent, query.minConfidence, query.b2b, query.created],
   );
   // The previous counts stay visible while new ones load, so labels don't flicker.
   const [facets, setFacets] = useState<Facets | null>(null);
@@ -76,7 +83,10 @@ export default function CardList() {
   // Below md the filters sit behind a disclosure so results start above the fold.
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filtersId = useId();
-  const activeFilters = [query.source, query.intent, query.minConfidence, query.b2b].filter(Boolean).length;
+  const activeFilters = [query.source, query.intent, query.minConfidence, query.b2b, query.created].filter(Boolean).length;
+  // Reset clears every filter (not the search box or sort, which have their own controls).
+  const resetFilters = () =>
+    set({ source: undefined, intent: undefined, minConfidence: undefined, b2b: false, created: undefined });
   const sortChanged = query.sort !== "confidence";
   const onSearch = useCallback((q: string | undefined) => setQuery({ ...query, q, page: 0 }), [query, setQuery]);
 
@@ -140,6 +150,18 @@ export default function CardList() {
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium">
+          Added
+          <select
+            className={selectCls}
+            value={query.created ?? ""}
+            onChange={(e) => set({ created: (e.target.value || undefined) as CardQuery["created"] })}
+          >
+            <option value="">Any time</option>
+            <option value="week">New this week (7 days)</option>
+            <option value="month">New this month (30 days)</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-sm font-medium">
           Sort by
           <select className={selectCls} value={query.sort} onChange={(e) => set({ sort: e.target.value })}>
             <option value="confidence">Confidence</option>
@@ -159,6 +181,15 @@ export default function CardList() {
             {facets?.is_b2b_filtered.true !== undefined ? `(${facets.is_b2b_filtered.true})` : ""}
           </span>
         </label>
+        {activeFilters > 0 && (
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="min-h-11 self-end rounded px-3 text-sm font-medium text-accent underline underline-offset-4 hover:no-underline"
+          >
+            Reset filters
+          </button>
+        )}
       </form>
 
       <div aria-live="polite">
