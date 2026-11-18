@@ -53,11 +53,40 @@ def test_embeds_in_batches_and_writes_model(monkeypatch):
     assert "scope=b2b-pain" in out and "embedded=5" in out
 
 
+class CountingEmbedder(FakeEmbeddingClient):
+    def __init__(self):
+        super().__init__()
+        self.requests = 0
+
+    def _embed(self, texts):
+        self.requests += 1
+        return super()._embed(texts)
+
+
 def test_all_flag_dry_run_and_empty_text():
     store = StubStore([{"id": 1, "title": None, "body": None}, *sigs(1)])
-    code, out = run_cli(["--all", "--dry-run"], store)
+    embedder = CountingEmbedder()
+    code, out = run_cli(["--all", "--dry-run"], store, embedder)
     assert code == 0 and store.pain_only is False and store.saved == []
-    assert "embedded=1 skipped_empty=1" in out and "scope=all" in out
+    assert embedder.requests == 0  # IF-85: no provider call under --dry-run
+    assert "would_embed=1 skipped_empty=1" in out and "scope=all" in out
+    assert "requests=0" in out
+
+
+def test_dry_run_plans_batches_without_calling_provider(monkeypatch):
+    monkeypatch.setattr(embed, "BATCH_SIZE", 2)
+    store = StubStore(sigs(5))
+    embedder = CountingEmbedder()
+    code, out = run_cli(["--dry-run"], store, embedder)
+    assert code == 0 and embedder.requests == 0 and store.saved == []
+    assert "mode=dry-run" in out and "would_embed=5" in out and "planned_requests=3" in out
+
+
+def test_counting_embedder_counts_real_runs():
+    store = StubStore(sigs(1))
+    embedder = CountingEmbedder()
+    code, _ = run_cli([], store, embedder)
+    assert code == 0 and embedder.requests == 1 and len(store.saved) == 1
 
 
 def test_rejects_wrong_dimensions():

@@ -90,9 +90,9 @@ def test_dry_run_and_skip_synthesize(keys):
     rec = Recorder()
     code, out = run(["--sources", "hackernews", "--dry-run", "--skip-synthesize"], rec)
     assert code == 0
-    assert rec.calls == [("ingest:hackernews", ["--source", "hackernews", "--dry-run"]),
-                         ("embed", ["--dry-run"])]
-    assert "stage=extract status=skipped dry-run" in out
+    assert rec.calls[0] == ("ingest:hackernews", ["--source", "hackernews", "--dry-run"])
+    assert rec.calls[1][0] == "extract" and rec.calls[1][1][-1] == "--dry-run"
+    assert rec.calls[2] == ("embed", ["--dry-run"]) and len(rec.calls) == 3
     assert "stage=synthesize status=skipped --skip-synthesize" in out
 
 
@@ -179,3 +179,49 @@ def test_backlog_read_failure_never_fails_pipeline(keys):
     assert code == 0 and "backlog skipped: read failed (HTTP 503)" in out.getvalue()
     _, text = run(["--sources", "hackernews"], Recorder())
     assert "backlog skipped: missing SUPABASE_URL" in text
+
+
+class _DryStore:
+    """Read-only stub for extract + embed; any write fails the test."""
+
+    def fetch_unprocessed_pool(self):
+        return [{"id": i, "source_platform": "github", "title": f"CSV export broken {i}",
+                 "body": "We export CSV by hand every week, costs hours.", "tags": []}
+                for i in range(1, 10)]
+
+    def fetch_signals_to_embed(self, limit, *, pain_only=True):
+        return [{"id": 1, "title": "t", "body": "b"}]
+
+    def __getattr__(self, name):  # save_extraction, mark_processed, save_signal_embedding
+        raise AssertionError(f"dry run must not write: {name}")
+
+
+def test_dry_run_makes_zero_provider_calls_end_to_end(keys):
+    """IF-85: real extract/embed stages with fake providers — 0 requests under --dry-run."""
+    from scrapers import embed, extract
+    from scrapers.llm.fake import FakeEmbeddingClient, FakeLLMClient
+
+    llm = FakeLLMClient()
+    embedded: list[int] = []
+
+    class _Embedder(FakeEmbeddingClient):
+        def _embed(self, texts):
+            embedded.append(len(texts))
+            return super()._embed(texts)
+
+    store = _DryStore()
+    stages = {
+        "ingest": lambda argv, out: 0,
+        "extract": lambda argv, out: extract.run(
+            argv, llm_factory=lambda: llm, store_factory=lambda: store, out=out),
+        "embed": lambda argv, out: embed.run(
+            argv, embedder_factory=_Embedder, store_factory=lambda: store, out=out),
+    }
+    out = io.StringIO()
+    code = pipeline.run(["--sources", "hackernews", "--dry-run", "--skip-synthesize"],
+                        stages=stages, out=out)
+    text = out.getvalue()
+    assert code == 0, text
+    assert llm.calls == [] and embedded == []
+    assert "stage=extract status=ok" in text and "stage=embed status=ok" in text
+    assert "extract mode=dry-run" in text and "embed mode=dry-run" in text

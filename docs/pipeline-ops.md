@@ -33,7 +33,7 @@ It runs `ingest` for every source → `extract` → `embed` → `synthesize`, th
 backlog. Useful variants:
 
 ```bash
-python -m scrapers.pipeline --dry-run                       # no writes, extract skipped; smoke test
+python -m scrapers.pipeline --dry-run                       # no writes, no LLM/embedding calls; smoke test
 python -m scrapers.pipeline --sources hackernews,github     # subset of sources
 python -m scrapers.pipeline --skip-synthesize               # ingest + extract + embed only
 python -m scrapers.pipeline --help                          # all flags
@@ -43,17 +43,17 @@ Each stage can also be run alone (all accept `--help`; all but `cluster` accept 
 
 ```bash
 python -m scrapers.ingest --source hackernews --dry-run
-python -m scrapers.extract --help          # see warning below before using --dry-run
+python -m scrapers.extract --dry-run       # prints the plan: candidates, batches, planned requests
 python -m scrapers.embed --dry-run
 python -m scrapers.synthesize --dry-run
 python -m scrapers.cluster --report        # read-only similarity report
 ```
 
-> **Warning:** `scrapers.extract --dry-run` still **calls the LLM** (it only skips writes),
-> so it spends the daily quota. Use `python -m scrapers.pipeline --dry-run` (which skips
-> extract) for a smoke test, or pass `--limit` / `--max-requests` to cap it. Likewise
-> `embed --dry-run` (also run by `pipeline --dry-run`) calls the embedding provider for any
-> pending signals; `synthesize --dry-run` makes no LLM calls.
+> `--dry-run` never calls a provider (IF-85): `extract --dry-run` prints the signals it
+> would send, the batch count and `planned_requests` against `--max-requests`;
+> `embed --dry-run` prints `would_embed` and `planned_requests`; `synthesize --dry-run`
+> makes no LLM calls. A dry run therefore costs no daily quota. (Retries of invalid batch
+> items are not in `planned_requests`; the real run's `--max-requests` cap still applies.)
 
 ## 3. Daily LLM budget
 
@@ -87,7 +87,7 @@ pipeline status=success stages=6 ok=5 failed=0 skipped=1
 | Line | Meaning |
 |---|---|
 | `status=ok exit=0` | Stage finished cleanly. |
-| `status=skipped <reason>` | Not run on purpose: missing source secrets, `--dry-run` (extract), or `--skip-synthesize`. Never fails the pipeline. |
+| `status=skipped <reason>` | Not run on purpose: missing source secrets or `--skip-synthesize`. Never fails the pipeline. |
 | `status=failed exit=N` | Stage returned non-zero; its own `error:` line just above says why. Later stages still run. |
 | `since=<iso> reason=…` | Ingest look-back start: `last_success` (newest successful run − 1 h), `default` (14 days), or `flag` (`--since-days`). |
 | `source=… fetched= inserted= skipped=` | Ingest totals; `skipped` = already stored (re-runs are safe). |

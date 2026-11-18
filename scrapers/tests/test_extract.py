@@ -170,10 +170,21 @@ def test_runner_provider_errors_leave_signals_unprocessed_and_stop():
 def test_runner_dry_run_and_limit():
     sigs = [dict(GOLDEN[0]["signal"], id=i) for i in range(1, 4)]
     store = StubStore(sigs)
-    code, out = run_cli(["--dry-run", "--limit", "2", "--batch-size", "1"],
-                        SeqLLM([json.dumps(valid())] * 2), store)
+    llm = SeqLLM([])
+    code, out = run_cli(["--dry-run", "--limit", "2", "--batch-size", "1"], llm, store)
     assert code == 0 and store.saved == [] and store.processed == []
-    assert "mode=dry-run" in out and "candidates=2 requests=2" in out and "processed=2" in out
+    assert llm.calls == []  # IF-85: a dry run never spends provider quota
+    assert "mode=dry-run" in out and "candidates=2 batches=2 planned_requests=2" in out
+    assert "requests=0" in out
+
+
+def test_dry_run_makes_zero_llm_calls_and_respects_max_requests():
+    sigs = [dict(GOLDEN[0]["signal"], id=i) for i in range(1, 21)]
+    store = StubStore(sigs)
+    llm = FakeLLMClient()
+    code, out = run_cli(["--dry-run", "--batch-size", "8", "--max-requests", "2"], llm, store)
+    assert code == 0 and llm.calls == [] and store.saved == [] and store.processed == []
+    assert "candidates=20 batches=3 planned_requests=2 max_requests=2 requests=0" in out
 
 
 def test_runner_missing_env_names_variable(monkeypatch):

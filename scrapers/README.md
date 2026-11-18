@@ -59,7 +59,7 @@ signals not reached wait for the next run. Embed runs after extract because it e
 already classified as B2B pain. Sources with missing secrets (e.g. `REDDIT_*`) are skipped
 with a note; a failing source or stage is reported and the rest still run. Prints one
 `stage=… status=…` line per stage plus a `pipeline status=…` total; exit 0 only if no
-stage failed. `--dry-run` = ingest/embed/synthesize dry-runs, extract skipped.
+stage failed. `--dry-run` = every stage's dry-run: no writes, no LLM/embedding requests (IF-85).
 
 **Backlog (IF-65).** At the end the pipeline prints, read-only, one line per source plus a
 `total` line:
