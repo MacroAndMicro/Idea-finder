@@ -15,9 +15,11 @@ scrapers/
   ingest.py          CLI: python -m scrapers.ingest --source {hackernews,github,stackexchange}
   embed.py           CLI: python -m scrapers.embed — 1536-d embeddings on raw_signals
   extract.py         CLI: python -m scrapers.extract — per-signal LLM extraction → signal_extractions
+  synthesize.py      CLI: python -m scrapers.synthesize — clusters → opportunity_cards + card_signals
   llm/               provider-agnostic LLMClient / EmbeddingClient: base, factory, fake, gemini
-  llm/prompts/       versioned prompts (extract_signal_v1); never edited after shipping
+  llm/prompts/       versioned prompts (extract_signal_v1, synthesize_card_v1); never edited after shipping
   llm/extraction_schema.py  strict JSON validation of extraction output
+  llm/card_schema.py        strict JSON validation of card-synthesis output
   tests/             pytest suite (test_*.py, conftest.py, helpers.py)
   tests/fixtures/    recorded API responses (github, hackernews, stackexchange) — tests never touch the network
 ```
@@ -85,3 +87,28 @@ Confidence score (rounded, clamped to 1–100; weights sum to 100):
 | Recency | 20 | share of signals created within 30 days of `now` (unknown date = not recent) |
 | Engagement | 15 | `min(1, log10(1+Σ(score+comments)) / log10(501))` |
 | Economic intent | 10 | max over signals: High 1 · Medium 0.6 · Low 0.3 · Unspecified 0 |
+
+## Synthesize (clusters → Opportunity Cards)
+
+```
+python -m scrapers.synthesize [--min-signals 2] [--limit 10] [--threshold 0.82] [--dry-run]
+```
+
+Clusters embedded B2B pain-point signals (`cluster.py`) and writes one `opportunity_cards`
+row per cluster with >= `--min-signals` signals (default 2: a card needs corroboration),
+plus `card_signals` links. Highest-confidence clusters first; `--limit` caps LLM calls
+per run (free-tier quotas) and the rest wait for the next run. `--dry-run` = no LLM, no writes.
+
+- The LLM (prompt `synthesize_card_v1`, schema `llm/card_schema.py`, one retry) writes only
+  `title`, `problem_statement`, the "when" sentence of `trigger_context`, `market_size`,
+  `duct_tape_solutions`, `mvp_wedge`, and `valid_opportunity` (false → no card).
+- Computed in code, never by the model: the `Frequency:` sentence of `trigger_context`
+  (post count, platforms, date range), `economic_intent` (strongest intent in the cluster's
+  extractions), `confidence_score`, `signal_count`, `platform_count`, `first/last_seen_at`,
+  `source_platform` (dominant), `source_url` + `raw_content_snippet` (strongest signal by
+  score + comments).
+- Idempotent: a cluster with >= 50 % (`OVERLAP_MATCH`) of its signals already linked to a
+  card is that card — new signals are linked and counts/confidence/frequency refreshed,
+  with no LLM call. A new card whose text embedding has cosine >= **0.90**
+  (`CARD_DUPLICATE_THRESHOLD`) with an existing card is merged into it instead.
+- A quota-exhausted provider response stops the run at once.
