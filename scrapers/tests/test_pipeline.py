@@ -47,7 +47,7 @@ def test_runs_stages_in_order_with_extract_cap(keys):
     assert code == 0
     assert [c[0] for c in rec.calls] == ["ingest:hackernews", "ingest:github", "extract",
                                          "embed", "synthesize"]
-    assert rec.calls[2][1] == ["--limit", "7"]
+    assert rec.calls[2][1] == ["--limit", "7", "--batch-size", "8", "--max-requests", "18"]
     assert rec.calls[4][1] == ["--limit", "2"]
     assert "pipeline status=success stages=5 ok=5 failed=0 skipped=0" in out
 
@@ -109,3 +109,11 @@ def test_stage_argparse_exit_counts_as_failure(keys):
     code = pipeline.run(["--sources", "hackernews"], stages={**rec.stages(), "extract": bad},
                         out=out)
     assert code == 1 and "stage=extract status=failed exit=2" in out.getvalue()
+
+
+def test_default_extract_budget_fits_free_tier(keys):
+    rec = Recorder()
+    run(["--sources", "hackernews"], rec)
+    argv = dict(zip(rec.calls[1][1][::2], rec.calls[1][1][1::2], strict=True))
+    assert argv == {"--limit": "112", "--batch-size": "8", "--max-requests": "18"}
+    assert pipeline.DEFAULT_EXTRACT_MAX_REQUESTS + pipeline.DEFAULT_SYNTHESIZE_LIMIT == 20

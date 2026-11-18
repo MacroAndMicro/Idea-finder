@@ -1,13 +1,15 @@
 """One-shot pipeline: ingest → extract → embed → synthesize.
 
     python -m scrapers.pipeline [--sources hackernews,github,stackexchange,reddit]
-        [--extract-limit 18] [--synthesize-limit 2] [--skip-synthesize] [--dry-run]
+        [--extract-limit 112] [--extract-batch-size 8] [--extract-max-requests 18]
+        [--synthesize-limit 2] [--skip-synthesize] [--dry-run]
 
 Runs each module's own ``run()`` in order (no duplicated logic):
 1. ``scrapers.ingest --source S`` for every source; sources whose secrets are missing
    (e.g. Reddit before API approval) are skipped with a one-line note.
-2. ``scrapers.extract --limit N`` — capped so a day's LLM budget is explicit
-   (free tier: 20 requests/day → 18 extractions + 2 card writes by default).
+2. ``scrapers.extract --limit N --batch-size B --max-requests R`` — capped so a day's
+   LLM budget is explicit. Free tier, 20 requests/day: up to 18 extraction requests
+   (14 batches of 8 = 112 signals, leaving 4 for single-signal retries) + 2 card writes.
 3. ``scrapers.embed`` — embeds the B2B pain points extract just found. Embed runs
    *after* extract because it only embeds signals with a pain/B2B extraction; the
    other order would leave today's extractions out of today's cards.
@@ -34,7 +36,11 @@ from scrapers.adapters.reddit import REQUIRED_VARS as REDDIT_VARS
 
 log = logging.getLogger("scrapers.pipeline")
 
-DEFAULT_EXTRACT_LIMIT = 18
+#: Gemini free tier = 20 generate requests/day: 18 for extract + 2 for synthesize.
+DEFAULT_EXTRACT_BATCH_SIZE = 8
+DEFAULT_EXTRACT_MAX_REQUESTS = 18
+#: 14 full batches (14 requests) leave 4 requests for single-signal retries.
+DEFAULT_EXTRACT_LIMIT = 14 * DEFAULT_EXTRACT_BATCH_SIZE
 DEFAULT_SYNTHESIZE_LIMIT = 2
 #: Variables a source needs before it is worth calling (others are optional).
 SOURCE_SECRETS: dict[str, tuple[str, ...]] = {
@@ -83,7 +89,13 @@ def run(argv: Sequence[str] | None = None, *,
     parser = argparse.ArgumentParser(prog="python -m scrapers.pipeline")
     parser.add_argument("--sources", default=",".join(DEFAULT_SOURCES),
                         help="comma-separated ingest sources")
-    parser.add_argument("--extract-limit", type=int, default=DEFAULT_EXTRACT_LIMIT)
+    parser.add_argument("--extract-limit", type=int, default=DEFAULT_EXTRACT_LIMIT,
+                        help="max signals extract handles")
+    parser.add_argument("--extract-batch-size", type=int, default=DEFAULT_EXTRACT_BATCH_SIZE,
+                        help="signals per extraction request")
+    parser.add_argument("--extract-max-requests", type=int,
+                        default=DEFAULT_EXTRACT_MAX_REQUESTS,
+                        help="max LLM requests for extract")
     parser.add_argument("--synthesize-limit", type=int, default=DEFAULT_SYNTHESIZE_LIMIT,
                         help="max LLM calls for card writing")
     parser.add_argument("--skip-synthesize", action="store_true")
@@ -119,7 +131,9 @@ def run(argv: Sequence[str] | None = None, *,
         record(StageResult("extract", "skipped", "dry-run (would spend LLM quota)"))
     else:
         record(_call(stage["extract"], "extract",
-                     ["--limit", str(args.extract_limit)], out))
+                     ["--limit", str(args.extract_limit),
+                      "--batch-size", str(args.extract_batch_size),
+                      "--max-requests", str(args.extract_max_requests)], out))
 
     record(_call(stage["embed"], "embed", [*dry], out))
 
