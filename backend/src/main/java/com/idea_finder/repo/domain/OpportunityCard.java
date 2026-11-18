@@ -73,6 +73,28 @@ public class OpportunityCard {
 	@Column(name = "embedding_model")
 	private String embeddingModel;
 
+	/** IF-35: number of raw signals behind the card (null until card synthesis fills it). */
+	@Column(name = "signal_count")
+	private Integer signalCount;
+
+	/** IF-35: number of distinct source platforms among the card's signals. */
+	@Column(name = "platform_count")
+	private Integer platformCount;
+
+	@Column(name = "first_seen_at")
+	private OffsetDateTime firstSeenAt;
+
+	@Column(name = "last_seen_at")
+	private OffsetDateTime lastSeenAt;
+
+	/** IF-35: internal reproducibility metadata; never exposed by the API. */
+	@Column(name = "llm_model")
+	private String llmModel;
+
+	/** IF-35: internal reproducibility metadata; never exposed by the API. */
+	@Column(name = "prompt_version")
+	private String promptVersion;
+
 	@Column(name = "created_at", nullable = false)
 	private OffsetDateTime createdAt;
 

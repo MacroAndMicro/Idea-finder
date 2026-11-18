@@ -2,6 +2,7 @@ package com.idea_finder.repo.domain;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 
@@ -11,6 +12,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.repository.Repository;
+import org.springframework.data.repository.query.Param;
 
 import jakarta.persistence.criteria.Predicate;
 
@@ -23,6 +25,26 @@ public interface OpportunityCardRepository
 	boolean existsById(Long id);
 
 	long count();
+
+	List<OpportunityCard> findByIdIn(Collection<Long> ids);
+
+	/**
+	 * IF-24: rows of [Long id, Double cosineDistance] of the cards nearest to {@code id} by embedding,
+	 * nearest first, excluding the card itself and cards without an embedding. Empty when the card
+	 * has no embedding. The distance expression matches the HNSW (vector_cosine_ops) index, and the
+	 * target vector is an uncorrelated subquery so the planner can use that index (approximate
+	 * nearest-neighbour; no secondary sort key, which would force a full scan).
+	 */
+	@Query(nativeQuery = true, value = """
+		select c.id, c.embedding <=> (select t.embedding from {h-schema}opportunity_cards t where t.id = :id) as distance
+		from {h-schema}opportunity_cards c
+		where c.id <> :id
+		  and c.embedding is not null
+		  and exists (select 1 from {h-schema}opportunity_cards t where t.id = :id and t.embedding is not null)
+		order by c.embedding <=> (select t.embedding from {h-schema}opportunity_cards t where t.id = :id)
+		limit :limit
+		""")
+	List<Object[]> findNearest(@Param("id") long id, @Param("limit") int limit);
 
 	/** Rows of [SourcePlatform, Long count]. */
 	@Query("select c.sourcePlatform, count(c) from OpportunityCard c group by c.sourcePlatform")
@@ -47,7 +69,16 @@ public interface OpportunityCardRepository
 	 */
 	default Page<OpportunityCard> search(String q, SourcePlatform source, BigDecimal minConfidence,
 			EconomicIntent intent, Pageable pageable) {
-		return findAll(filters(q, source, minConfidence, intent), pageable);
+		return search(q, source, minConfidence, intent, null, pageable);
+	}
+
+	/**
+	 * As above, plus IF-37's optional {@code b2b} filter on is_b2b_filtered: true/false match that
+	 * exact value (cards with an unknown/null flag match neither); null = not filtered.
+	 */
+	default Page<OpportunityCard> search(String q, SourcePlatform source, BigDecimal minConfidence,
+			EconomicIntent intent, Boolean b2b, Pageable pageable) {
+		return findAll(filters(q, source, minConfidence, intent, b2b), pageable);
 	}
 
 	char LIKE_ESCAPE = '\\';
@@ -62,7 +93,7 @@ public interface OpportunityCardRepository
 	}
 
 	static Specification<OpportunityCard> filters(String q, SourcePlatform source, BigDecimal minConfidence,
-			EconomicIntent intent) {
+			EconomicIntent intent, Boolean b2b) {
 		return (root, query, cb) -> {
 			List<Predicate> predicates = new ArrayList<>();
 			if (q != null) {
@@ -80,6 +111,9 @@ public interface OpportunityCardRepository
 			}
 			if (intent != null) {
 				predicates.add(cb.equal(root.get("economicIntent"), intent));
+			}
+			if (b2b != null) {
+				predicates.add(cb.equal(root.get("b2bFiltered"), b2b));
 			}
 			return cb.and(predicates.toArray(Predicate[]::new));
 		};

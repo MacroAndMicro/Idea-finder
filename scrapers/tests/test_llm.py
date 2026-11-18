@@ -99,3 +99,58 @@ def test_gemini_llm_parses_text(make_client):
     body = json.loads(transport.requests[0].body)
     assert body["generationConfig"]["responseMimeType"] == "application/json"
     assert body["systemInstruction"]["parts"][0]["text"] == "sys"
+
+
+def _resp(code, fixture):
+    from scrapers.http_client import HttpResponse
+    from scrapers.tests.helpers import load_fixture
+
+    return HttpResponse(code, {}, load_fixture(f"gemini/{fixture}"))
+
+
+def test_gemini_retry_hint_parses_retryinfo_and_per_day_quota():
+    from scrapers.http_client import HttpResponse
+    from scrapers.llm.gemini import gemini_retry_hint
+
+    assert gemini_retry_hint(_resp(429, "quota_per_day_429.json")) >= 17399.0
+    assert gemini_retry_hint(_resp(429, "per_minute_429.json")) == 7.0
+    assert gemini_retry_hint(HttpResponse(429, {}, b"not json")) is None
+    assert gemini_retry_hint(HttpResponse(503, {}, b"{}")) is None
+
+
+def test_gemini_daily_quota_429_is_one_request_then_quota_exhausted(clock):
+    from scrapers.http_client import QuotaExhausted
+    from scrapers.llm import gemini
+    from scrapers.tests.helpers import FakeTransport
+
+    transport = FakeTransport([_resp(429, "quota_per_day_429.json"), ok({})])
+    client = gemini._llm_http_client()
+    client._transport, client._sleep, client._clock = transport, clock.sleep, clock.time
+    llm = GeminiLLMClient("m", "KEY", client=client)
+    with pytest.raises(QuotaExhausted):
+        llm.complete("s", "p", json_mode=True)
+    assert len(transport.requests) == 1 and clock.sleeps == []
+
+
+def test_gemini_llm_retries_503_only_once(clock):
+    from scrapers.http_client import RateLimitExceeded
+    from scrapers.llm import gemini
+    from scrapers.tests.helpers import FakeTransport, status
+
+    transport = FakeTransport([status(503), status(503), ok({})])
+    client = gemini._llm_http_client()
+    client._transport, client._sleep, client._clock = transport, clock.sleep, clock.time
+    with pytest.raises(RateLimitExceeded):
+        GeminiLLMClient("m", "KEY", client=client).complete("s", "p")
+    assert len(transport.requests) == 2
+
+
+def test_gemini_retry_hint_tolerates_odd_violations():
+    import json as _json
+
+    from scrapers.http_client import HttpResponse
+    from scrapers.llm.gemini import gemini_retry_hint
+
+    body = {"error": {"details": [{"violations": ["oops", None, {"quotaId": "PerDayX"}]},
+                                  {"violations": "nope"}, "str"]}}
+    assert gemini_retry_hint(HttpResponse(429, {}, _json.dumps(body).encode())) == 86400.0

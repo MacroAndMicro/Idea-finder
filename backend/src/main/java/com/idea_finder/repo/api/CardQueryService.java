@@ -1,7 +1,11 @@
 package com.idea_finder.repo.api;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 import java.util.Locale;
 import java.util.stream.Collectors;
 
@@ -11,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.idea_finder.repo.domain.EconomicIntent;
+import com.idea_finder.repo.domain.OpportunityCard;
 import com.idea_finder.repo.domain.OpportunityCardRepository;
 import com.idea_finder.repo.domain.RawSignalRepository;
 import com.idea_finder.repo.domain.SourcePlatform;
@@ -26,6 +31,8 @@ public class CardQueryService {
 	public static final int MAX_PAGE = 10_000;
 	public static final int MIN_Q = 2;
 	public static final int MAX_Q = 100;
+	public static final int DEFAULT_SIMILAR = 5;
+	public static final int MAX_SIMILAR = 20;
 
 	private final OpportunityCardRepository repository;
 	private final RawSignalRepository signals;
@@ -42,6 +49,11 @@ public class CardQueryService {
 
 	public PageResponse<CardResponse> list(Integer page, Integer size, String q, String source,
 			BigDecimal minConfidence, String intent, String sort) {
+		return list(page, size, q, source, minConfidence, intent, sort, null);
+	}
+
+	public PageResponse<CardResponse> list(Integer page, Integer size, String q, String source,
+			BigDecimal minConfidence, String intent, String sort, String b2b) {
 		String keyword = parseQuery(q);
 		if (minConfidence != null
 				&& (minConfidence.compareTo(BigDecimal.ZERO) < 0 || minConfidence.compareTo(BigDecimal.valueOf(100)) > 0)) {
@@ -49,7 +61,8 @@ public class CardQueryService {
 		}
 		PageRequest pageable = pageRequest(page, size, parseSort(sort));
 		return PageResponse.of(
-			repository.search(keyword, parseSource(source), minConfidence, parseIntent(intent), pageable),
+			repository.search(keyword, parseSource(source), minConfidence, parseIntent(intent), parseB2b(b2b),
+				pageable),
 			CardResponse::from);
 	}
 
@@ -67,15 +80,50 @@ public class CardQueryService {
 		return PageResponse.of(signals.findByCardId(cardId, pageable), SignalResponse::from);
 	}
 
+	/**
+	 * IF-24: cards nearest to {@code id} by embedding (cosine), most similar first. 404 for an
+	 * unknown card; empty when the card has no embedding.
+	 */
+	public List<SimilarCardResponse> similar(long id, Integer limit) {
+		int n = limit == null ? DEFAULT_SIMILAR : limit;
+		if (n < 1 || n > MAX_SIMILAR) {
+			throw new InvalidParameterException("limit", "limit must be between 1 and " + MAX_SIMILAR);
+		}
+		if (!repository.existsById(id)) {
+			throw new CardNotFoundException(id);
+		}
+		List<Object[]> nearest = repository.findNearest(id, n);
+		if (nearest.isEmpty()) {
+			return List.of();
+		}
+		Map<Long, OpportunityCard> byId = repository
+			.findByIdIn(nearest.stream().map(row -> ((Number) row[0]).longValue()).toList())
+			.stream()
+			.collect(Collectors.toMap(OpportunityCard::getId, Function.identity()));
+		List<SimilarCardResponse> result = new ArrayList<>(nearest.size());
+		for (Object[] row : nearest) {
+			OpportunityCard card = byId.get(((Number) row[0]).longValue());
+			if (card != null) { // deleted between the two queries
+				result.add(SimilarCardResponse.of(CardResponse.from(card), ((Number) row[1]).doubleValue()));
+			}
+		}
+		return result;
+	}
+
 	/** Shared paging limits for every list endpoint. */
 	static PageRequest pageRequest(Integer page, Integer size, Sort sort) {
+		return pageRequest(page, size, sort, MAX_SIZE);
+	}
+
+	/** As {@link #pageRequest(Integer, Integer, Sort)} with an endpoint-specific maximum size. */
+	static PageRequest pageRequest(Integer page, Integer size, Sort sort, int maxSize) {
 		int p = page == null ? 0 : page;
 		int s = size == null ? DEFAULT_SIZE : size;
 		if (p < 0 || p > MAX_PAGE) {
 			throw new InvalidParameterException("page", "page must be between 0 and " + MAX_PAGE);
 		}
-		if (s < 1 || s > MAX_SIZE) {
-			throw new InvalidParameterException("size", "size must be between 1 and " + MAX_SIZE);
+		if (s < 1 || s > maxSize) {
+			throw new InvalidParameterException("size", "size must be between 1 and " + maxSize);
 		}
 		return PageRequest.of(p, s, sort);
 	}
@@ -99,7 +147,21 @@ public class CardQueryService {
 		return switch (value) {
 			case "confidence" -> Sort.by(Sort.Order.desc("confidenceScore").nullsLast()).and(newest);
 			case "newest" -> newest;
-			default -> throw new InvalidParameterException("sort", "sort must be one of: confidence, newest");
+			// IF-35: most recently seen in the sources first; cards without signal dates last.
+			case "recent" -> Sort.by(Sort.Order.desc("lastSeenAt").nullsLast(), Sort.Order.desc("id"));
+			default -> throw new InvalidParameterException("sort", "sort must be one of: confidence, newest, recent");
+		};
+	}
+
+	/** IF-37: strict true/false (case-insensitive); absent/blank = no filter. */
+	static Boolean parseB2b(String b2b) {
+		if (isBlank(b2b)) {
+			return null;
+		}
+		return switch (b2b.trim().toLowerCase(Locale.ROOT)) {
+			case "true" -> Boolean.TRUE;
+			case "false" -> Boolean.FALSE;
+			default -> throw new InvalidParameterException("b2b", "b2b must be true or false");
 		};
 	}
 

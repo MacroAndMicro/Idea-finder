@@ -1,0 +1,2 @@
+# IF-40: build the if_test schema from supabase/migrations before the first test class.
+org.springframework.test.context.TestExecutionListener=com.idea_finder.repo.MigratedTestSchema

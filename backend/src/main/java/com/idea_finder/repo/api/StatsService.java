@@ -1,6 +1,7 @@
 package com.idea_finder.repo.api;
 
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -8,11 +9,13 @@ import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.idea_finder.repo.domain.IngestionRun;
+import com.idea_finder.repo.domain.IngestionRunRepository;
 import com.idea_finder.repo.domain.OpportunityCardRepository;
 import com.idea_finder.repo.domain.RawSignalRepository;
 import com.idea_finder.repo.domain.SourcePlatform;
 
-/** Aggregate counts over cards and raw signals (a handful of COUNT queries, no caching yet). */
+/** Aggregate counts over cards, raw signals and extractions (a handful of COUNT queries, no caching yet). */
 @Service
 @Transactional(readOnly = true)
 public class StatsService {
@@ -23,10 +26,12 @@ public class StatsService {
 
 	private final OpportunityCardRepository cards;
 	private final RawSignalRepository signals;
+	private final IngestionRunRepository runs;
 
-	public StatsService(OpportunityCardRepository cards, RawSignalRepository signals) {
+	public StatsService(OpportunityCardRepository cards, RawSignalRepository signals, IngestionRunRepository runs) {
 		this.cards = cards;
 		this.signals = signals;
+		this.runs = runs;
 	}
 
 	public StatsResponse stats() {
@@ -36,7 +41,21 @@ public class StatsService {
 			signals.count(),
 			bySource(signals.countBySource()),
 			signals.countByProcessedAtIsNull(),
-			signals.lastFetchedAt());
+			signals.lastFetchedAt(),
+			lastRuns(runs.findLatestPerSource()),
+			StatsResponse.Pipeline.of(signals.pipelineCounts()));
+	}
+
+	/** Phase 1 sources first (null when never run), then any other source that has runs. */
+	static Map<String, StatsResponse.LastRun> lastRuns(List<IngestionRun> latest) {
+		Map<String, StatsResponse.LastRun> result = new LinkedHashMap<>();
+		PHASE_1_SOURCES.forEach(p -> result.put(p.dbValue(), StatsResponse.LastRun.NEVER));
+		// Ties on started_at: the higher id (inserted later) wins.
+		latest.stream()
+			.sorted(Comparator.comparing(IngestionRun::getId))
+			.forEach(r -> result.put(r.getSourcePlatform().dbValue(),
+				new StatsResponse.LastRun(r.lastActivityAt(), r.getStatus())));
+		return Collections.unmodifiableMap(result);
 	}
 
 	/** Phase 1 sources first (zero-filled), then any other source that actually has rows. */

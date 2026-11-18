@@ -30,7 +30,8 @@ public class SecurityConfig {
 			.logout(AbstractHttpConfigurer::disable)
 			.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.authorizeHttpRequests(auth -> auth
-				.requestMatchers(HttpMethod.GET, "/api/health", "/api/stats", "/api/cards", "/api/cards/**").permitAll()
+				.requestMatchers(HttpMethod.GET, "/api/health", "/api/stats", "/api/ingestion-runs",
+					"/api/cards", "/api/cards/**").permitAll()
 				// Lets error responses for permitted endpoints render instead of turning into 403.
 				.requestMatchers("/error").permitAll()
 				.anyRequest().denyAll());
