@@ -31,6 +31,11 @@ cd frontend && npm ci && npm run lint && npm run build
 pip install -r scrapers/requirements.txt && ruff check scrapers && pytest scrapers
 ```
 
+## Running the pipeline
+
+Daily command, output lines, LLM budget and what to do when a stage fails:
+[`docs/pipeline-ops.md`](docs/pipeline-ops.md).
+
 ## API
 
 The backend's endpoints, parameters, errors and example responses are documented in
