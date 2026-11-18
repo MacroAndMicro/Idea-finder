@@ -41,4 +41,12 @@ class CorsConfigTest {
 		assertThat(config.getAllowedMethods()).containsExactly("GET", "HEAD", "OPTIONS");
 		assertThat(config.getAllowCredentials()).isFalse();
 	}
+
+	/** IF-54: the frontend may send and read X-Request-Id. */
+	@Test
+	void requestIdHeaderIsAllowedAndExposed() {
+		CorsConfiguration config = configFor("https://a.example.com");
+		assertThat(config.getAllowedHeaders()).contains("X-Request-Id");
+		assertThat(config.getExposedHeaders()).containsExactly("X-Request-Id");
+	}
 }

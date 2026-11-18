@@ -15,6 +15,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.idea_finder.repo.config.RequestIdFilter;
+
 /** Pure MVC slice (no DB): the error contract of {@link ApiExceptionHandler}. */
 class ApiExceptionHandlerTest {
 
@@ -45,6 +47,7 @@ class ApiExceptionHandlerTest {
 	void setUp() {
 		mvc = MockMvcBuilders.standaloneSetup(new ThrowingController())
 			.setControllerAdvice(new ApiExceptionHandler())
+			.addFilters(new RequestIdFilter())
 			.build();
 	}
 
@@ -60,7 +63,16 @@ class ApiExceptionHandlerTest {
 			.andExpect(content().string(not(containsString("opportunity_cards"))))
 			.andExpect(content().string(not(containsString("IllegalStateException"))))
 			.andExpect(content().string(not(containsString("at com."))))
-			.andExpect(jsonPath("$.stackTrace").doesNotExist());
+			.andExpect(jsonPath("$.stackTrace").doesNotExist())
+			.andExpect(jsonPath("$.requestId").isNotEmpty());
+	}
+
+	/** IF-54: the 500 body echoes the request's id. */
+	@Test
+	void unexpectedErrorCarriesRequestId() throws Exception {
+		mvc.perform(get("/boom").header(RequestIdFilter.HEADER, "req-7"))
+			.andExpect(status().isInternalServerError())
+			.andExpect(jsonPath("$.requestId").value("req-7"));
 	}
 
 	@Test

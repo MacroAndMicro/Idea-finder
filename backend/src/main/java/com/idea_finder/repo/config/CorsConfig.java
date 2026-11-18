@@ -24,7 +24,9 @@ public class CorsConfig {
 		CorsConfiguration config = new CorsConfiguration();
 		config.setAllowedOrigins(origins);
 		config.setAllowedMethods(List.of("GET", "HEAD", "OPTIONS"));
-		config.setAllowedHeaders(List.of("Content-Type", "Accept"));
+		config.setAllowedHeaders(List.of("Content-Type", "Accept", RequestIdFilter.HEADER));
+		// IF-54: lets the frontend read the request id to show/report it.
+		config.setExposedHeaders(List.of(RequestIdFilter.HEADER));
 		config.setAllowCredentials(false);
 		config.setMaxAge(3600L);
 		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

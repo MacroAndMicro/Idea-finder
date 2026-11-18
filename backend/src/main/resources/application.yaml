@@ -39,6 +39,11 @@ server:
     include-binding-errors: never
     include-exception: false
 
+logging:
+  pattern:
+    # IF-54: every log line carries the request id (empty outside a request).
+    level: "%5p [%X{requestId:-}]"
+
 app:
   cors:
     # Comma-separated list of origins allowed to call the API (the Next.js frontend).
