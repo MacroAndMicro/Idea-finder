@@ -1,0 +1,27 @@
+# IF-76: keep the build context small and free of secrets.
+target/
+**/target/
+.env
+.env.*
+**/.env
+**/.env.*
+*.log
+HELP.md
+.git
+.gitignore
+.dockerignore
+Dockerfile
+# IDE / OS files
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+.factorypath
+.apt_generated
+.sts4-cache/
+nbproject/
+.DS_Store
