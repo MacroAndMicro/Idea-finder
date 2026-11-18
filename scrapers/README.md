@@ -59,6 +59,19 @@ with a note; a failing source or stage is reported and the rest still run. Print
 `stage=… status=…` line per stage plus a `pipeline status=…` total; exit 0 only if no
 stage failed. `--dry-run` = ingest/embed/synthesize dry-runs, extract skipped.
 
+**Backlog (IF-65).** At the end the pipeline prints, read-only, one line per source plus a
+`total` line:
+
+```
+backlog source=github ingested=50 extracted=8 skipped=0 unprocessed=42 days_to_clear=1 per_day=112
+```
+
+`extracted` = has a `signal_extractions` row, `skipped` = processed by the pre-filter with no
+row, `unprocessed` = `processed_at` null, `days_to_clear = ceil(unprocessed / --extract-limit)`
+(one pipeline run per day). Each source line assumes the whole daily budget; the `total`
+line is the shared-budget estimate. Missing Supabase secrets or a failed read print
+`backlog skipped: …` and never fail the pipeline.
+
 ## Ingest
 
 ```

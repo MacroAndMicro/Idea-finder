@@ -18,21 +18,27 @@ Runs each module's own ``run()`` in order (no duplicated logic):
 A failing source or stage is reported and the remaining stages still run. Exit code 0
 only if no stage failed (skipped stages do not count as failures). ``--dry-run`` passes
 ``--dry-run`` to ingest, embed and synthesize and skips extract (it would spend LLM quota).
-Each module prints its own counts; this runner adds one status line per stage and a
-final total. Nothing here prints secrets: notes name variables only.
+Each module prints its own counts; this runner adds one status line per stage, a
+final total and (IF-65, read-only) one ``backlog`` line per source: ingested, extracted,
+skipped (pre-filter), unprocessed and estimated days to clear at ``--extract-limit``
+signals per day. Nothing here prints secrets: notes name variables only.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import math
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import TextIO
+from typing import Any, TextIO
 
 from scrapers import config, embed, extract, ingest, synthesize
 from scrapers.adapters.reddit import REQUIRED_VARS as REDDIT_VARS
+from scrapers.config import MissingSecretError
+from scrapers.http_client import HttpError
+from scrapers.store import SupabaseStore
 
 log = logging.getLogger("scrapers.pipeline")
 
@@ -61,6 +67,72 @@ DEFAULT_STAGES: dict[str, Stage] = {
 }
 
 
+BacklogSource = Callable[[], tuple[list[dict[str, Any]], set[int]]]
+
+
+def _default_backlog() -> tuple[list[dict[str, Any]], set[int]]:
+    return SupabaseStore.from_env().fetch_backlog()
+
+
+@dataclass(frozen=True)
+class BacklogRow:
+    source: str
+    ingested: int
+    extracted: int
+    skipped: int
+    unprocessed: int
+    days_to_clear: int | None
+
+
+def days_to_clear(unprocessed: int, per_day: int) -> int | None:
+    """Whole days to classify ``unprocessed`` signals at ``per_day``; None if never."""
+    if unprocessed <= 0:
+        return 0
+    if per_day <= 0:
+        return None
+    return math.ceil(unprocessed / per_day)
+
+
+def backlog_rows(signals: Sequence[dict[str, Any]], extracted_ids: set[int],
+                 per_day: int) -> list[BacklogRow]:
+    """Per-source backlog, sorted by source. ``skipped`` = processed without an
+    extraction row (the extract pre-filter, IF-50). Each source's estimate assumes the
+    whole daily extract budget; the ``total`` row is the honest shared-budget figure."""
+    by_source: dict[str, list[int]] = {}
+    for sig in signals:
+        src = str(sig.get("source_platform") or "other")
+        counts = by_source.setdefault(src, [0, 0, 0])  # ingested, extracted, unprocessed
+        counts[0] += 1
+        if int(sig["id"]) in extracted_ids:
+            counts[1] += 1
+        elif not sig.get("processed_at"):
+            counts[2] += 1
+    rows = [BacklogRow(src, n, e, n - e - u, u, days_to_clear(u, per_day))
+            for src, (n, e, u) in sorted(by_source.items())]
+    if rows:
+        total = [sum(getattr(r, k) for r in rows)
+                 for k in ("ingested", "extracted", "skipped", "unprocessed")]
+        rows.append(BacklogRow("total", *total, days_to_clear(total[3], per_day)))
+    return rows
+
+
+def print_backlog(source: BacklogSource, per_day: int, out: TextIO) -> None:
+    """Read-only; never fails the pipeline (a note is printed instead)."""
+    try:
+        signals, extracted = source()
+    except MissingSecretError as exc:
+        print(f"backlog skipped: missing {exc.name}", file=out)
+        return
+    except HttpError as exc:
+        print(f"backlog skipped: read failed (HTTP {exc.status})", file=out)
+        return
+    for r in backlog_rows(signals, extracted, per_day):
+        days = "never" if r.days_to_clear is None else str(r.days_to_clear)
+        print(f"backlog source={r.source} ingested={r.ingested} extracted={r.extracted} "
+              f"skipped={r.skipped} unprocessed={r.unprocessed} "
+              f"days_to_clear={days} per_day={per_day}", file=out)
+
+
 @dataclass
 class StageResult:
     name: str
@@ -85,6 +157,7 @@ def _call(stage: Stage, name: str, argv: list[str], out: TextIO) -> StageResult:
 
 def run(argv: Sequence[str] | None = None, *,
         stages: dict[str, Stage] | None = None,
+        backlog: BacklogSource | None = None,
         out: TextIO = sys.stdout) -> int:
     parser = argparse.ArgumentParser(prog="python -m scrapers.pipeline")
     parser.add_argument("--sources", default=",".join(DEFAULT_SOURCES),
@@ -142,6 +215,8 @@ def run(argv: Sequence[str] | None = None, *,
     else:
         synth_args = dry or ["--limit", str(args.synthesize_limit)]
         record(_call(stage["synthesize"], "synthesize", list(synth_args), out))
+
+    print_backlog(backlog or _default_backlog, args.extract_limit, out)
 
     counts = {k: sum(1 for r in results if r.status == k) for k in ("ok", "failed", "skipped")}
     status = "success" if counts["failed"] == 0 else "failed"
