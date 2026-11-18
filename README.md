@@ -36,6 +36,12 @@ pip install -r scrapers/requirements.txt && ruff check scrapers && pytest scrape
 Daily command, output lines, LLM budget and what to do when a stage fails:
 [`docs/pipeline-ops.md`](docs/pipeline-ops.md).
 
+## Running the API against prod rows (QA / User Simulator)
+
+`scripts/local-api-from-prod.sh` starts a local Postgres + pgvector, replays the migrations, loads
+rows exported with the Supabase connector and runs the backend on `:8080`:
+[`docs/local-api.md`](docs/local-api.md).
+
 ## API
 
 The backend's endpoints, parameters, errors and example responses are documented in
