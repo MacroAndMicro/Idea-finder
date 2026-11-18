@@ -3,6 +3,7 @@ package com.idea_finder.repo.api;
 import java.math.BigDecimal;
 import java.util.List;
 
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,9 +16,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class CardController {
 
 	private final CardQueryService cards;
+	private final AggregateCaching caching;
 
-	public CardController(CardQueryService cards) {
+	public CardController(CardQueryService cards, AggregateCaching caching) {
 		this.cards = cards;
+		this.caching = caching;
 	}
 
 	@GetMapping
@@ -35,13 +38,14 @@ public class CardController {
 
 	/** IF-53: counts per filter option for the card list's filter chips (same filters as list). */
 	@GetMapping("/facets")
-	public FacetsResponse facets(
+	public ResponseEntity<FacetsResponse> facets(
 			@RequestParam(required = false) String q,
 			@RequestParam(required = false) String source,
 			@RequestParam(required = false) BigDecimal minConfidence,
 			@RequestParam(required = false) String intent,
 			@RequestParam(required = false) String b2b) {
-		return cards.facets(q, source, minConfidence, intent, b2b);
+		// IF-68: cacheable like /api/stats; card list, detail, signals and similar stay uncached.
+		return caching.ok(cards.facets(q, source, minConfidence, intent, b2b));
 	}
 
 	@GetMapping("/{id}")

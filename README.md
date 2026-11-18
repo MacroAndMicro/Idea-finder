@@ -49,6 +49,11 @@ overridden with environment variables:
 | `DB_IDLE_TIMEOUT_MS` | `300000` | Idle connection retirement |
 | `DB_MAX_LIFETIME_MS` | `900000` | Max connection lifetime |
 | `SHUTDOWN_TIMEOUT` | `20s` | Graceful-shutdown grace period |
+| `API_RATE_LIMIT_PER_MINUTE` | `120` | Requests per minute per client IP on `/api/**` (`/api/health` exempt); over it: 429 + `Retry-After` |
+| `API_RATE_LIMIT_MAX_CLIENTS` | `10000` | Max client IPs tracked in memory (idle ones evicted first) |
+| `API_TRUST_FORWARDED_FOR` | `false` | Set `true` only behind a trusted reverse proxy: the client IP is then the right-most `X-Forwarded-For` entry |
+| `API_AGGREGATE_CACHE_MAX_AGE` | `60s` | `Cache-Control: public, max-age` on `/api/stats` and `/api/cards/facets` (`0` = no header) |
+| `HEALTH_DB_TIMEOUT_SECONDS` | `2` | Query timeout of the `select 1` behind `GET /api/health` (200 `db:up` / 503 `db:down`) |
 
 ## Workflow
 
