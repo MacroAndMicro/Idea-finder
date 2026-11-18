@@ -31,6 +31,11 @@ cd frontend && npm ci && npm run lint && npm run build
 pip install -r scrapers/requirements.txt && ruff check scrapers && pytest scrapers
 ```
 
+## API
+
+The backend's endpoints, parameters, errors and example responses are documented in
+[`docs/api.md`](docs/api.md).
+
 ## Configuration
 
 Secrets and settings come only from environment variables. Copy `.env.example` to `.env`
