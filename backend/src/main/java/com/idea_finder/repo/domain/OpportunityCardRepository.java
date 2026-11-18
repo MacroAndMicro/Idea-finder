@@ -1,6 +1,7 @@
 package com.idea_finder.repo.domain;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -78,7 +79,13 @@ public interface OpportunityCardRepository
 	 */
 	default Page<OpportunityCard> search(String q, SourcePlatform source, BigDecimal minConfidence,
 			EconomicIntent intent, Boolean b2b, Pageable pageable) {
-		return findAll(filters(q, source, minConfidence, intent, b2b), pageable);
+		return search(q, source, minConfidence, intent, b2b, null, pageable);
+	}
+
+	/** As above, plus IF-77's optional {@code createdSince}: cards with created_at >= that instant. */
+	default Page<OpportunityCard> search(String q, SourcePlatform source, BigDecimal minConfidence,
+			EconomicIntent intent, Boolean b2b, OffsetDateTime createdSince, Pageable pageable) {
+		return findAll(filters(q, source, minConfidence, intent, b2b, createdSince), pageable);
 	}
 
 	char LIKE_ESCAPE = '\\';
@@ -94,6 +101,11 @@ public interface OpportunityCardRepository
 
 	static Specification<OpportunityCard> filters(String q, SourcePlatform source, BigDecimal minConfidence,
 			EconomicIntent intent, Boolean b2b) {
+		return filters(q, source, minConfidence, intent, b2b, null);
+	}
+
+	static Specification<OpportunityCard> filters(String q, SourcePlatform source, BigDecimal minConfidence,
+			EconomicIntent intent, Boolean b2b, OffsetDateTime createdSince) {
 		return (root, query, cb) -> {
 			List<Predicate> predicates = new ArrayList<>();
 			if (q != null) {
@@ -114,6 +126,9 @@ public interface OpportunityCardRepository
 			}
 			if (b2b != null) {
 				predicates.add(cb.equal(root.get("b2bFiltered"), b2b));
+			}
+			if (createdSince != null) {
+				predicates.add(cb.greaterThanOrEqualTo(root.<OffsetDateTime>get("createdAt"), createdSince));
 			}
 			return cb.and(predicates.toArray(Predicate[]::new));
 		};
