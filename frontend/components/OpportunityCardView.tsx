@@ -23,10 +23,10 @@ export default function OpportunityCardView({ card }: { card: OpportunityCard })
   const id = useId();
   const sourceHref = safeHref(card.source_url);
   return (
-    <article className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 md:gap-4" aria-labelledby={id}>
+    <article className="relative flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 md:gap-4" aria-labelledby={id}>
       <header className="flex flex-col gap-2">
         <h2 id={id} className="text-base font-semibold leading-snug">
-          <Link href={`/cards/${card.id}`} className="rounded underline-offset-4 hover:text-accent hover:underline">
+          <Link href={`/cards/${card.id}`} className="stretched-link rounded-lg underline-offset-4 hover:text-accent hover:underline">
             {card.title}
           </Link>
         </h2>
@@ -49,7 +49,7 @@ export default function OpportunityCardView({ card }: { card: OpportunityCard })
           type="button"
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
-          className="min-h-11 rounded px-3 text-sm font-medium text-accent hover:underline"
+          className="relative z-10 min-h-11 rounded px-3 text-sm font-medium text-accent hover:underline"
         >
           {open ? "Show less" : "Show full card"}
         </button>
@@ -58,7 +58,7 @@ export default function OpportunityCardView({ card }: { card: OpportunityCard })
             href={sourceHref}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex min-h-11 items-center rounded px-3 text-sm font-medium text-accent hover:underline"
+            className="relative z-10 inline-flex min-h-11 items-center rounded px-3 text-sm font-medium text-accent hover:underline"
           >
             View source<span className="sr-only"> (opens in new tab)</span>
           </a>

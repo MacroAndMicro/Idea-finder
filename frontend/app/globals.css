@@ -67,3 +67,25 @@ body {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/*
+ * Stretched link: the card's title link covers the whole card so the route into
+ * card detail is a full-card touch target (IF-88). The card must be `relative`;
+ * other controls in the card sit above it with `relative z-10`. Unlayered so it
+ * overrides the global :focus-visible outline and moves the ring onto the card.
+ */
+.stretched-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.stretched-link:focus-visible {
+  outline: none;
+}
+
+.stretched-link:focus-visible::after {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
