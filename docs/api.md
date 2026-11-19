@@ -32,6 +32,7 @@ page needs a fix.
   |---|---|---|
   | 400 | Invalid query parameter (see each endpoint) | `title: "Invalid request parameter"`, `parameter: "<name>"` |
   | 400 | Non-numeric value for a numeric parameter (`page`, `size`, `limit`, `minConfidence`, `{id}`) | Spring's standard ProblemDetail (no `parameter` key) |
+  | 403 | Path or method not allowed (see above) | `title: "Forbidden"`, `requestId` |
   | 404 | Unknown card id | `title: "Card not found"` |
   | 429 | Rate limit exceeded | `title: "Too Many Requests"`, `requestId`; `Retry-After` header (seconds) |
   | 500 | Unexpected server error | `detail: "Unexpected server error"`, `requestId` |
