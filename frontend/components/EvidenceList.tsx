@@ -14,11 +14,12 @@ type State = {
   error?: string;
 };
 
+/** With a URL, the title link stretches over the whole item (44px+ touch target, IF-89). */
 function SignalItem({ s }: { s: Signal }) {
   const title = s.title?.trim() || "Untitled post";
   const href = safeHref(s.url);
   return (
-    <li className="flex flex-col gap-2 border-t border-border py-4 first:border-t-0 first:pt-0 last:pb-0">
+    <li className="relative flex flex-col gap-2 border-t border-border py-4 first:border-t-0 first:pt-0 last:pb-0">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
         <SourceBadge source={s.source_platform} />
         {s.source_created_at && <When iso={s.source_created_at} />}
@@ -40,7 +41,7 @@ function SignalItem({ s }: { s: Signal }) {
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded text-accent underline-offset-4 hover:underline"
+            className="stretched-link rounded text-accent underline-offset-4 hover:underline"
           >
             {title}
             <span className="sr-only"> (opens in new tab)</span>
