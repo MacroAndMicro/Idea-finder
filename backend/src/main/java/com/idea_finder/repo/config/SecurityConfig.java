@@ -34,7 +34,12 @@ public class SecurityConfig {
 					"/api/cards", "/api/cards/**").permitAll()
 				// Lets error responses for permitted endpoints render instead of turning into 403.
 				.requestMatchers("/error").permitAll()
-				.anyRequest().denyAll());
+				.anyRequest().denyAll())
+			// IF-90: denied requests get a ProblemDetail body, not Spring's default error JSON.
+			.exceptionHandling(e -> {
+				ForbiddenProblemHandler forbidden = new ForbiddenProblemHandler();
+				e.authenticationEntryPoint(forbidden).accessDeniedHandler(forbidden);
+			});
 		return http.build();
 	}
 
