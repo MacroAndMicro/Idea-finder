@@ -8,11 +8,11 @@ limits (403/429 + Retry-After) are honored by the shared HttpClient.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable, Iterator, Sequence
-from datetime import UTC, datetime, timedelta
+from collections.abc import Callable, Iterator, Sequence
+from datetime import UTC, datetime
 
 from scrapers import config
-from scrapers.adapters.base import SourceAdapter
+from scrapers.adapters.base import SourceAdapter, interleave, rolling_window_start
 from scrapers.http_client import HttpClient, HttpError
 from scrapers.models import RawSignal, hash_author, html_to_text
 
@@ -49,13 +49,7 @@ def issue_window_start(since: datetime, now: datetime, lookback_days: int) -> da
     ``reactions:>=N`` they need, and once they do they are outside the next run's window
     (IF-93). ``lookback_days <= 0`` disables the rolling window (plain ``since``).
     """
-    if since.tzinfo is None:
-        since = since.replace(tzinfo=UTC)
-    if lookback_days <= 0:
-        return since
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=UTC)
-    return min(since, now - timedelta(days=lookback_days))
+    return rolling_window_start(since, now, lookback_days)
 
 
 def issue_lookback_from_env() -> int:
@@ -72,17 +66,6 @@ def issue_lookback_from_env() -> int:
                     DEFAULT_ISSUE_LOOKBACK_DAYS)
         return DEFAULT_ISSUE_LOOKBACK_DAYS
     return value
-
-
-def interleave(streams: Iterable[Iterator[RawSignal]]) -> Iterator[RawSignal]:
-    """Round-robin over lazy streams until all are exhausted."""
-    active = list(streams)
-    while active:
-        for stream in list(active):
-            try:
-                yield next(stream)
-            except StopIteration:
-                active.remove(stream)
 
 
 class GitHubIssuesAdapter(SourceAdapter):
