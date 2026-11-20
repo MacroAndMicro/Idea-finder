@@ -1,6 +1,7 @@
 package com.idea_finder.repo.api;
 
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -11,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -116,12 +118,42 @@ class CardControllerTest {
 	}
 
 	@ParameterizedTest
-	@CsvSource({"size, abc", "page, 1.5", "minConfidence, high"})
+	@CsvSource({"size, abc", "page, 1.5", "minConfidence, high", "minConfidence, NaN",
+		"minConfidence, Infinity", "minConfidence, -Infinity"})
 	void malformedParamsReturn400ProblemDetail(String name, String value) throws Exception {
 		mvc.perform(get("/api/cards").param(name, value))
 			.andExpect(status().isBadRequest())
 			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-			.andExpect(jsonPath("$.status").value(400));
+			.andExpect(jsonPath("$.status").value(400))
+			.andExpect(jsonPath("$.title").value("Invalid request parameter"))
+			.andExpect(jsonPath("$.parameter").value(name))
+			.andExpect(jsonPath("$.detail", not(containsString("Failed to convert"))));
+	}
+
+	/** IF-95: type-mismatch 400s name the parameter and the expected type, like other validation errors. */
+	@Test
+	void nanMinConfidenceNamesExpectedRange() throws Exception {
+		mvc.perform(get("/api/cards").param("minConfidence", "NaN"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.detail").value("minConfidence must be a number between 0 and 100"));
+		mvc.perform(get("/api/cards/facets").param("minConfidence", "NaN"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.parameter").value("minConfidence"));
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = {"/api/cards/abc", "/api/cards/99999999999999999999", "/api/cards/export",
+		"/api/cards/abc/similar", "/api/cards/abc/signals"})
+	void malformedIdReturns400WithParameter(String path) throws Exception {
+		mvc.perform(get(path).param("format", "csv"))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.status").value(400))
+			.andExpect(jsonPath("$.title").value("Invalid request parameter"))
+			.andExpect(jsonPath("$.parameter").value("id"))
+			.andExpect(jsonPath("$.detail").value("id must be a positive integer"))
+			.andExpect(jsonPath("$.detail", not(containsString("abc"))))
+			.andExpect(jsonPath("$.detail", not(containsString("99999"))));
 	}
 
 	@Test

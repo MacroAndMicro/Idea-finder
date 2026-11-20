@@ -7,12 +7,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.idea_finder.repo.config.RequestIdFilter;
@@ -33,6 +37,12 @@ class ApiExceptionHandlerTest {
 		@GetMapping("/bad")
 		String bad() {
 			throw new InvalidParameterException("sort", "Unsupported sort 'x'");
+		}
+
+		@GetMapping("/typed/{id}")
+		String typed(@PathVariable long id, @RequestParam(required = false) BigDecimal minConfidence,
+				@RequestParam(required = false) Integer size) {
+			return "ok";
 		}
 
 		@GetMapping("/missing")
@@ -94,5 +104,43 @@ class ApiExceptionHandlerTest {
 			.andExpect(jsonPath("$.status").value(404))
 			.andExpect(jsonPath("$.title").value("Card not found"))
 			.andExpect(jsonPath("$.detail").value("Card 42 not found"));
+	}
+
+	/** IF-95: conversion failures use the same shape as other parameter errors, without echoing input. */
+	@Test
+	void typeMismatchOnPathVariableNamesParameter() throws Exception {
+		mvc.perform(get("/typed/<script>"))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.status").value(400))
+			.andExpect(jsonPath("$.title").value("Invalid request parameter"))
+			.andExpect(jsonPath("$.parameter").value("id"))
+			.andExpect(jsonPath("$.detail").value("id must be a positive integer"))
+			.andExpect(jsonPath("$.detail", not(containsString("script"))));
+	}
+
+	@Test
+	void typeMismatchOnNanMinConfidence() throws Exception {
+		mvc.perform(get("/typed/1").param("minConfidence", "NaN"))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.title").value("Invalid request parameter"))
+			.andExpect(jsonPath("$.parameter").value("minConfidence"))
+			.andExpect(jsonPath("$.detail").value("minConfidence must be a number between 0 and 100"))
+			.andExpect(jsonPath("$.detail", not(containsString("NaN"))));
+	}
+
+	@Test
+	void typeMismatchOnIntegerParamNamesType() throws Exception {
+		mvc.perform(get("/typed/1").param("size", "1.5"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.parameter").value("size"))
+			.andExpect(jsonPath("$.detail").value("size must be an integer"));
+	}
+
+	@Test
+	void typedEndpointStillWorksWithValidValues() throws Exception {
+		mvc.perform(get("/typed/7").param("minConfidence", "50").param("size", "3"))
+			.andExpect(status().isOk());
 	}
 }
