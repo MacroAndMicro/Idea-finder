@@ -17,7 +17,7 @@ fails. Details of each stage live in [`scrapers/README.md`](../scrapers/README.m
 | ingest `stackexchange` | `STACKEXCHANGE_KEY` |
 | ingest `reddit` | `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT` |
 | ingest `hackernews` | none |
-| Optional overrides | `SCRAPER_USER_AGENT`, `REDDIT_SUBREDDITS`, `STACKEXCHANGE_SITES`, `GITHUB_DISCUSSION_QUERIES` |
+| Optional overrides | `SCRAPER_USER_AGENT`, `REDDIT_SUBREDDITS`, `STACKEXCHANGE_SITES`, `GITHUB_DISCUSSION_QUERIES`, `GITHUB_ISSUE_LOOKBACK_DAYS` |
 
 A source whose secrets are missing is skipped, not failed (see §4).
 
@@ -89,7 +89,7 @@ pipeline status=success stages=6 ok=5 failed=0 skipped=1
 | `status=ok exit=0` | Stage finished cleanly. |
 | `status=skipped <reason>` | Not run on purpose: missing source secrets or `--skip-synthesize`. Never fails the pipeline. |
 | `status=failed exit=N` | Stage returned non-zero; its own `error:` line just above says why. Later stages still run. |
-| `since=<iso> reason=…` | Ingest look-back start: `last_success` (newest successful run − 1 h), `default` (14 days), or `flag` (`--since-days`). |
+| `since=<iso> reason=…` | Ingest look-back start: `last_success` (newest successful run − 1 h), `default` (14 days), or `flag` (`--since-days`). GitHub issues additionally search a rolling `GITHUB_ISSUE_LOOKBACK_DAYS` window (default 14, IF-93) so issues that gain reactions later are still found. |
 | `source=… fetched= inserted= skipped=` | Ingest totals; `skipped` = already stored (re-runs are safe). |
 | `extract … requests= processed= failed= provider_errors=` | LLM calls used, signals classified, invalid outputs stored as failed rows, provider errors. |
 | `synthesize … created= merged= rejected= deferred= errors=` | Cards written / merged into existing ones / rejected by the model / waiting for the next run. |
