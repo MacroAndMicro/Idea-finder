@@ -29,7 +29,7 @@ scrapers/
 
 Run: `pip install -r scrapers/requirements.txt && ruff check scrapers && pytest scrapers`
 
-Env vars: `GITHUB_TOKEN`, `GITHUB_DISCUSSION_QUERIES` (optional), `GITHUB_ISSUE_LOOKBACK_DAYS` (optional, default 14), `STACKEXCHANGE_KEY`, `SCRAPER_USER_AGENT` (optional),
+Env vars: `GITHUB_TOKEN`, `GITHUB_DISCUSSION_QUERIES` (optional), `GITHUB_ISSUE_LOOKBACK_DAYS` (optional, default 14), `STACKEXCHANGE_KEY`, `STACKEXCHANGE_LOOKBACK_DAYS` (optional, default 14), `SCRAPER_USER_AGENT` (optional),
 `LLM_PROVIDER`/`LLM_MODEL`/`LLM_API_KEY`, `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/
 `EMBEDDING_API_KEY`/`EMBEDDING_DIMENSIONS` (must be 1536). Adding a source = one new
 `SourceAdapter` subclass; G2/Capterra are Phase 2 and intentionally absent.
@@ -121,6 +121,21 @@ it short: every query costs API requests (adapters keep their rate limits and pa
   `["discussion", <category>]`. GraphQL `errors` or any HTTP failure stop the discussion
   stream with a warning; issues are never affected. Note: Claude Code cloud sessions block
   GraphQL (HTTP 403), so discussions only arrive when ingest runs elsewhere.
+
+### Stack Exchange (IF-94)
+
+`--source stackexchange` calls `/2.3/search/advanced` with `STACKEXCHANGE_KEY` for every
+`[stackexchange] queries` × `sites` pair, interleaved round-robin so one pair cannot fill
+`--limit`. **Rolling look-back:** `fromdate` is the earlier of the run's `since` and
+*now − N days* (`STACKEXCHANGE_LOOKBACK_DAYS`, default 14; `0` = plain `since`). A ~4 h
+window held 0–1 questions per query/site and captured every question at birth (score 0,
+no answers). **Signal choice:** `sort=activity` (desc) so questions that later earn answers,
+votes or edits resurface inside the window, and questions with a negative score are
+dropped client-side (`MIN_SCORE = 0`: the community marked them unclear/off-topic). We do
+not require answers — an unanswered "how do I…" is often the strongest pain signal.
+Re-seen questions are skipped by the store's `(source_platform, external_id)` de-dup.
+Unchanged: `backoff` honored, stop below `QUOTA_FLOOR` (50) `quota_remaining`, 0.5 s
+spacing, `max_pages` 3 per pair, no extra sites.
 
 ### Reddit
 
