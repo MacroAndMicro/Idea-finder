@@ -50,6 +50,9 @@ page needs a fix.
   on 200 (`API_AGGREGATE_CACHE_MAX_AGE`, default `60s`; `0` = no header). `/api/health` sends
   `no-store`. Other endpoints and all errors keep Spring Security's default (`no-cache, no-store`).
 - **Blank parameters** (empty or whitespace) mean "not set" for every filter.
+- **Repeated parameters** are rejected: giving any query parameter of `/api/cards/**` or
+  `/api/ingestion-runs` more than once (e.g. `?source=reddit&source=github`) is a 400
+  "Invalid request parameter" with `detail: "<name> must be given at most once"` (IF-92).
 
 ### Paging (list endpoints)
 
