@@ -8,8 +8,8 @@ limits (403/429 + Retry-After) are honored by the shared HttpClient.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator, Sequence
-from datetime import UTC, datetime
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from datetime import UTC, datetime, timedelta
 
 from scrapers import config
 from scrapers.adapters.base import SourceAdapter
@@ -23,6 +23,11 @@ PER_PAGE = 100
 MAX_SEARCH_RESULTS = 1000
 MIN_INTERVAL_SECONDS = 2.5  # 30 req/min search limit → never burst
 BODY_MAX_CHARS = 8000
+#: Rolling look-back for issue search (IF-93). ``reactions:>=N`` needs time to accrue, so
+#: the created window is never shorter than this many days, however recent the last run
+#: was; already-stored issues are skipped by the store's (platform, external_id) de-dup.
+DEFAULT_ISSUE_LOOKBACK_DAYS = 14
+ISSUE_LOOKBACK_ENV = "GITHUB_ISSUE_LOOKBACK_DAYS"
 
 
 def created_filter(since: datetime) -> str:
@@ -37,6 +42,49 @@ def created_filter(since: datetime) -> str:
     return f"created:>={since.astimezone(UTC):%Y-%m-%dT%H:%M:%SZ}"
 
 
+def issue_window_start(since: datetime, now: datetime, lookback_days: int) -> datetime:
+    """Start of the issue ``created`` window: the earlier of ``since`` and now - lookback.
+
+    The run window (``since``) is ~4h after IF-75; issues that young rarely have the
+    ``reactions:>=N`` they need, and once they do they are outside the next run's window
+    (IF-93). ``lookback_days <= 0`` disables the rolling window (plain ``since``).
+    """
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=UTC)
+    if lookback_days <= 0:
+        return since
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    return min(since, now - timedelta(days=lookback_days))
+
+
+def issue_lookback_from_env() -> int:
+    """``GITHUB_ISSUE_LOOKBACK_DAYS`` (int >= 0), else DEFAULT_ISSUE_LOOKBACK_DAYS."""
+    raw = config.get_env(ISSUE_LOOKBACK_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_ISSUE_LOOKBACK_DAYS
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        value = -1
+    if value < 0:
+        log.warning("%s must be an integer >= 0; using %d", ISSUE_LOOKBACK_ENV,
+                    DEFAULT_ISSUE_LOOKBACK_DAYS)
+        return DEFAULT_ISSUE_LOOKBACK_DAYS
+    return value
+
+
+def interleave(streams: Iterable[Iterator[RawSignal]]) -> Iterator[RawSignal]:
+    """Round-robin over lazy streams until all are exhausted."""
+    active = list(streams)
+    while active:
+        for stream in list(active):
+            try:
+                yield next(stream)
+            except StopIteration:
+                active.remove(stream)
+
+
 class GitHubIssuesAdapter(SourceAdapter):
     platform = "github"
 
@@ -48,24 +96,34 @@ class GitHubIssuesAdapter(SourceAdapter):
         max_pages: int = 3,
         label: str | None = None,
         min_reactions: int = 3,
+        lookback_days: int = DEFAULT_ISSUE_LOOKBACK_DAYS,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         super().__init__(client or HttpClient(min_interval=MIN_INTERVAL_SECONDS),
                          max_pages=max_pages)
         self._token = token
         self.label = label
         self.min_reactions = min_reactions
+        self.lookback_days = lookback_days
+        self._now = now
 
     @classmethod
     def from_env(cls, **kwargs) -> GitHubIssuesAdapter:
         return cls(config.get_env("GITHUB_TOKEN"), **kwargs)
 
     def build_query(self, query: str, since: datetime) -> str:
-        parts = [query, "is:issue", created_filter(since)]
+        start = issue_window_start(since, self._now(), self.lookback_days)
+        parts = [query, "is:issue", created_filter(start)]
         if self.min_reactions:
             parts.append(f"reactions:>={self.min_reactions}")
         if self.label:
             parts.append(f'label:"{self.label}"')
         return " ".join(p for p in parts if p)
+
+    def fetch_all(self, queries: Sequence[str], since: datetime) -> Iterator[RawSignal]:
+        """Round-robin over queries (IF-93): with a multi-day window the first query alone
+        can fill ``--limit``; pages stay lazy, so the per-query page cap is unchanged."""
+        return interleave(self.fetch(q, since) for q in queries)
 
     def fetch(self, query: str, since: datetime) -> Iterator[RawSignal]:
         if not self._token:
@@ -230,10 +288,12 @@ class GitHubAdapter(SourceAdapter):
     platform = "github"
 
     def __init__(self, token: str | None, client: HttpClient | None = None, *,
-                 discussion_queries: Sequence[str] = (), max_pages: int = 3) -> None:
+                 discussion_queries: Sequence[str] = (), max_pages: int = 3,
+                 issue_lookback_days: int = DEFAULT_ISSUE_LOOKBACK_DAYS) -> None:
         super().__init__(client or HttpClient(min_interval=MIN_INTERVAL_SECONDS),
                          max_pages=max_pages)
-        self.issues = GitHubIssuesAdapter(token, self.client, max_pages=max_pages)
+        self.issues = GitHubIssuesAdapter(token, self.client, max_pages=max_pages,
+                                          lookback_days=issue_lookback_days)
         self.discussions = GitHubDiscussionsAdapter(token, self.client)
         self.discussion_queries = tuple(discussion_queries)
 
@@ -243,6 +303,7 @@ class GitHubAdapter(SourceAdapter):
         if override:
             kwargs.setdefault("discussion_queries",
                               [q.strip() for q in override.split(",") if q.strip()])
+        kwargs.setdefault("issue_lookback_days", issue_lookback_from_env())
         return cls(config.get_env("GITHUB_TOKEN"), **kwargs)
 
     def fetch(self, query: str, since: datetime) -> Iterator[RawSignal]:
@@ -258,11 +319,5 @@ class GitHubAdapter(SourceAdapter):
                         exc.status)
 
     def fetch_all(self, queries: Sequence[str], since: datetime) -> Iterator[RawSignal]:
-        streams = [self.issues.fetch_all(queries, since),
-                   self._safe_discussions(since)]
-        while streams:
-            for stream in list(streams):
-                try:
-                    yield next(stream)
-                except StopIteration:
-                    streams.remove(stream)
+        return interleave([self.issues.fetch_all(queries, since),
+                           self._safe_discussions(since)])

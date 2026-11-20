@@ -78,7 +78,8 @@ def test_since_filter_uses_full_utc_instant_not_date():
     from scrapers.adapters.github import created_filter
 
     since = datetime(2026, 11, 18, 10, 30, tzinfo=UTC)
-    q = GitHubIssuesAdapter("tok").build_query("webhook", since)
+    # IF-93: lookback_days=0 isolates the instant formatting from the rolling window.
+    q = GitHubIssuesAdapter("tok", lookback_days=0).build_query("webhook", since)
     assert "created:>=2026-11-18T10:30:00Z" in q
     assert "created:>2026-11-18 " not in q + " "
     # the instant compares correctly against an item created later that day
@@ -90,3 +91,83 @@ def test_since_filter_uses_full_utc_instant_not_date():
     assert created_filter(datetime(2026, 11, 18, 11, 30, tzinfo=cet)) == (
         "created:>=2026-11-18T10:30:00Z"
     )
+
+
+# --- IF-93: rolling look-back for issue search -------------------------------------------
+
+def _issue(number: int, created: str, reactions: int) -> dict:
+    return {
+        "repository_url": "https://api.github.com/repos/o/r",
+        "html_url": f"https://github.com/o/r/issues/{number}", "number": number,
+        "title": f"t{number}", "created_at": created,
+        "reactions": {"total_count": reactions}, "comments": 0,
+    }
+
+
+def test_rolling_lookback_matches_older_issue_that_gained_reactions(make_client):
+    # Last success was 4h ago; an issue created 3 days ago with 5 reactions must still be
+    # in the search window (before IF-93 the window was only the last ~4h).
+    from scrapers.adapters.github import issue_window_start
+
+    now = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
+    since = datetime(2026, 11, 20, 8, 0, tzinfo=UTC)
+    issue_created = datetime(2026, 11, 17, 12, 0, tzinfo=UTC)
+    start = issue_window_start(since, now, 14)
+    assert start == datetime(2026, 11, 6, 12, 0, tzinfo=UTC)
+    assert issue_created >= start
+
+    adapter = GitHubIssuesAdapter("tok", None, now=lambda: now)
+    q = adapter.build_query("webhook", since)
+    assert "created:>=2026-11-06T12:00:00Z" in q and "reactions:>=3" in q
+
+    client, transport = make_client(
+        [ok({"total_count": 1, "items": [_issue(7, "2026-11-17T12:00:00Z", 5)]})])
+    adapter = GitHubIssuesAdapter("tok", client, now=lambda: now)
+    signals = list(adapter.fetch("webhook", since))
+    assert [s.external_id for s in signals] == ["o/r#7"] and signals[0].score == 5
+    assert "created%3A%3E%3D2026-11-06T12%3A00%3A00Z" in transport.requests[0].url
+
+
+def test_window_keeps_older_since_and_can_be_disabled():
+    from scrapers.adapters.github import issue_window_start
+
+    now = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
+    old = datetime(2026, 10, 1, tzinfo=UTC)
+    assert issue_window_start(old, now, 14) == old  # --since-days 50 still wins
+    recent = datetime(2026, 11, 20, 8, 0)  # naive → UTC
+    assert issue_window_start(recent, now, 0) == recent.replace(tzinfo=UTC)
+    q = GitHubIssuesAdapter("tok", None, lookback_days=0, now=lambda: now).build_query(
+        "x", recent)
+    assert "created:>=2026-11-20T08:00:00Z" in q
+
+
+def test_lookback_env(monkeypatch, caplog):
+    from scrapers.adapters.github import (
+        DEFAULT_ISSUE_LOOKBACK_DAYS,
+        GitHubAdapter,
+        issue_lookback_from_env,
+    )
+
+    monkeypatch.delenv("GITHUB_ISSUE_LOOKBACK_DAYS", raising=False)
+    assert issue_lookback_from_env() == DEFAULT_ISSUE_LOOKBACK_DAYS == 14
+    monkeypatch.setenv("GITHUB_ISSUE_LOOKBACK_DAYS", "30")
+    assert issue_lookback_from_env() == 30
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    assert GitHubAdapter.from_env().issues.lookback_days == 30
+    for bad in ("-1", "two"):
+        monkeypatch.setenv("GITHUB_ISSUE_LOOKBACK_DAYS", bad)
+        with caplog.at_level(logging.WARNING):
+            assert issue_lookback_from_env() == DEFAULT_ISSUE_LOOKBACK_DAYS
+    assert "GITHUB_ISSUE_LOOKBACK_DAYS" in caplog.text and "-1" not in caplog.text
+
+
+def test_issue_queries_round_robin_within_page_budget(make_client):
+    # A multi-day window must not let the first query fill --limit on its own.
+    page_a = {"total_count": 2, "items": [_issue(1, "2026-11-19T00:00:00Z", 4),
+                                          _issue(2, "2026-11-18T00:00:00Z", 4)]}
+    page_b = {"total_count": 1, "items": [_issue(3, "2026-11-19T00:00:00Z", 9)]}
+    client, transport = make_client([ok(page_a), ok(page_b)])
+    adapter = GitHubIssuesAdapter("tok", client, max_pages=3)
+    ids = [s.external_id for s in adapter.fetch_all(["a", "b"], SINCE)]
+    assert ids == ["o/r#1", "o/r#3", "o/r#2"]
+    assert len(transport.requests) == 2  # one page per query, no extra calls

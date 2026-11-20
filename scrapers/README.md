@@ -29,7 +29,7 @@ scrapers/
 
 Run: `pip install -r scrapers/requirements.txt && ruff check scrapers && pytest scrapers`
 
-Env vars: `GITHUB_TOKEN`, `GITHUB_DISCUSSION_QUERIES` (optional), `STACKEXCHANGE_KEY`, `SCRAPER_USER_AGENT` (optional),
+Env vars: `GITHUB_TOKEN`, `GITHUB_DISCUSSION_QUERIES` (optional), `GITHUB_ISSUE_LOOKBACK_DAYS` (optional, default 14), `STACKEXCHANGE_KEY`, `SCRAPER_USER_AGENT` (optional),
 `LLM_PROVIDER`/`LLM_MODEL`/`LLM_API_KEY`, `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/
 `EMBEDDING_API_KEY`/`EMBEDDING_DIMENSIONS` (must be 1536). Adding a source = one new
 `SourceAdapter` subclass; G2/Capterra are Phase 2 and intentionally absent.
@@ -105,7 +105,14 @@ it short: every query costs API requests (adapters keep their rate limits and pa
 
 `--source github` runs two streams on one `HttpClient` (2.5 s spacing, `X-RateLimit-*` /
 `Retry-After` handling) and interleaves them so a shared `--limit` reaches both:
-- **Issues** — REST `search/issues` with `[github] queries` (unchanged).
+- **Issues** — REST `search/issues` with `[github] queries`, `reactions:>=3`, sorted by
+  `created` desc, queries interleaved round-robin. **Rolling look-back (IF-93):** the
+  `created:>=` window starts at the earlier of the run's `since` and *now − N days*
+  (`GITHUB_ISSUE_LOOKBACK_DAYS`, default 14; `0` = plain `since`). A ~4 h `since` window
+  alone never saw issues once they had earned 3 reactions; re-seen issues are skipped by the
+  store's `(source_platform, external_id)` de-dup. Same page cap (`max_pages`) and 2.5 s
+  spacing as before, so no extra requests per run.
+- Discussions keep the plain run `since` window (unchanged; they have no reaction threshold).
 - **Discussions** — official GraphQL API, `search(type: DISCUSSION)` POSTed to
   `https://api.github.com/graphql` with `GITHUB_TOKEN` (plain HTTPS, no client library), using
   `[github] discussions` from `queries.toml` (override: `GITHUB_DISCUSSION_QUERIES`,
