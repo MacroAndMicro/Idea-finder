@@ -150,7 +150,7 @@ export default function RunsList() {
   const filtered = Boolean(source || status);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="mt-4 flex flex-col gap-6">
       <LatestPerSource />
 
       <section aria-labelledby="history-heading" className="flex flex-col gap-4">
